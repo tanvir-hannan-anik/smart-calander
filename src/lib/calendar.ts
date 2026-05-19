@@ -53,11 +53,25 @@ async function handleErrorResponse(res: Response): Promise<never> {
     throw new CalendarAuthError('Your Google Calendar session expired. Please reconnect your Google account.');
   }
   if (res.status === 403) {
+    // "API not enabled" is a project config issue, NOT an auth issue.
+    // Don't clear the token — the user's credentials are fine.
+    if (detail.toLowerCase().includes('api') && detail.toLowerCase().includes('not been used')) {
+      throw new Error(
+        '⚙️ The Google Calendar API is not enabled for this project. ' +
+        'Go to Google Cloud Console → APIs & Services → Library → search "Google Calendar API" → Enable it.'
+      );
+    }
+    if (detail.toLowerCase().includes('disabled')) {
+      throw new Error(
+        '⚙️ The Google Calendar API is disabled. Please enable it in Google Cloud Console → APIs & Services → Library.'
+      );
+    }
+    // Auth-related 403 (insufficient scope, denied, etc.) — clear token
     clearCalendarToken();
     throw new CalendarAuthError(
       detail.includes('insufficient')
         ? 'Calendar permission was not granted. Please reconnect and allow calendar access.'
-        : 'Google Calendar access was denied. Reconnect your account (and ensure the Calendar API is enabled).'
+        : 'Google Calendar access was denied. Please reconnect your account.'
     );
   }
   throw new Error(detail || `Google Calendar request failed (${res.status}).`);
