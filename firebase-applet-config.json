@@ -1,9 +1,9 @@
 {
-  "projectId": "tidal-torch-05xj8",
-  "appId": "1:128802113648:web:4135ceac42cf84c8a80cb5",
-  "apiKey": "AIzaSyCX7SXL1Rx3m_5ZlFsVMDhQ_k_dGCJt7kU",
-  "authDomain": "tidal-torch-05xj8.firebaseapp.com",
-  "storageBucket": "tidal-torch-05xj8.firebasestorage.app",
-  "messagingSenderId": "128802113648",
-  "measurementId": ""
+  "apiKey": "AIzaSyAUwaZVYhqZAcTtjQDtkWz7ef58POTCmow",
+  "authDomain": "smart-calander-c0d9a.firebaseapp.com",
+  "projectId": "smart-calander-c0d9a",
+  "storageBucket": "smart-calander-c0d9a.firebasestorage.app",
+  "messagingSenderId": "112402709813",
+  "appId": "1:112402709813:web:c48ce829c9819f74a6607c",
+  "measurementId": "G-G9Y26D5TP6"
 }
