@@ -25,6 +25,8 @@ interface DisplayEvent {
   duration: number;     // hours
   startLabel: string;
   color: string;
+  description?: string;
+  htmlLink?: string;
 }
 
 export default function CalendarView({ calendarConnected = false, onReconnect }: CalendarViewProps) {
@@ -38,6 +40,7 @@ export default function CalendarView({ calendarConnected = false, onReconnect }:
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newEvent, setNewEvent] = useState({ title: '', date: format(new Date(), 'yyyy-MM-dd'), startTime: '10:00', duration: 1, description: '' });
   const [isCreating, setIsCreating] = useState(false);
+  const [selectedEvent, setSelectedEvent] = useState<DisplayEvent | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -74,6 +77,8 @@ export default function CalendarView({ calendarConnected = false, onReconnect }:
           duration: Math.max((endDate.getTime() - startDate.getTime()) / 3_600_000, 0.5),
           startLabel: format(startDate, 'h:mm a'),
           color,
+          description: evt.description,
+          htmlLink: evt.htmlLink,
         };
       });
       setEvents(display);
@@ -250,6 +255,7 @@ export default function CalendarView({ calendarConnected = false, onReconnect }:
                         animate={{ opacity: 1, scale: 1 }}
                         key={event.id}
                         title={`${event.title} · ${event.startLabel}`}
+                        onClick={() => setSelectedEvent(event)}
                         className={cn(
                           "absolute left-1 right-1 rounded-md p-1.5 text-[11px] border backdrop-blur-sm overflow-hidden cursor-pointer transition-transform hover:scale-[1.02] z-10",
                           event.color
@@ -329,6 +335,65 @@ export default function CalendarView({ calendarConnected = false, onReconnect }:
                 <button onClick={handleCreateEvent} disabled={!newEvent.title || isCreating} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-md text-sm font-medium transition-colors">
                   {isCreating ? 'Saving...' : 'Save to Google Calendar'}
                 </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Event Details Modal */}
+      <AnimatePresence>
+        {selectedEvent && (
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setSelectedEvent(null)}>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-sm bg-[#222] border border-[#333] rounded-xl shadow-2xl p-6"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold truncate pr-4">{selectedEvent.title}</h2>
+                <button onClick={() => setSelectedEvent(null)} className="text-gray-500 hover:text-white transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+                  <div className="w-2 h-2 rounded-full bg-blue-500" />
+                  <span>{format(selectedEvent.date, 'EEEE, MMMM d')}</span>
+                </div>
+                
+                <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+                  <div className="w-2 h-2 rounded-full bg-orange-500" />
+                  <span>
+                    {selectedEvent.startLabel} - {format(new Date(selectedEvent.date.getTime() + selectedEvent.duration * 60 * 60 * 1000), 'h:mm a')}
+                    <span className="ml-2 opacity-60">({selectedEvent.duration} hr{selectedEvent.duration !== 1 ? 's' : ''})</span>
+                  </span>
+                </div>
+
+                {selectedEvent.description && (
+                  <div className="mt-4 p-3 bg-[#1A1A1A] rounded-lg border border-[#333] text-sm text-gray-300 whitespace-pre-wrap max-h-40 overflow-y-auto">
+                    {selectedEvent.description}
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-6 pt-4 border-t border-[#333] flex justify-end gap-3">
+                <button onClick={() => setSelectedEvent(null)} className="px-4 py-2 text-sm font-medium text-gray-400 hover:text-white transition-colors">
+                  Close
+                </button>
+                {selectedEvent.htmlLink && (
+                  <a
+                    href={selectedEvent.htmlLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-4 py-2 bg-[#1A1A1A] border border-[#444] hover:bg-[#333] text-white rounded-md text-sm font-medium transition-colors"
+                  >
+                    Open in Google Calendar
+                  </a>
+                )}
               </div>
             </motion.div>
           </div>

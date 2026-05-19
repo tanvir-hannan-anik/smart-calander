@@ -4,6 +4,7 @@ export interface CalendarEvent {
   id: string;
   summary: string;
   description?: string;
+  htmlLink?: string;
   start: { dateTime: string; timeZone?: string };
   end: { dateTime: string; timeZone?: string };
 }
