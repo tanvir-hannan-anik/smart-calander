@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  Calendar, CheckSquare, Clock, Command, 
-  Settings, Users, BookOpen, Layers, 
+import {
+  Calendar, CheckSquare, Clock, Command,
+  Settings, Users, BookOpen, Layers,
   MessageSquare, Sparkles, Mic, Plus, Search,
-  ChevronLeft, LayoutGrid, LogOut
+  ChevronLeft, LayoutGrid, LogOut, Menu, X
 } from 'lucide-react';
 import { cn } from './lib/utils';
 import Dashboard from './pages/Dashboard';
@@ -19,7 +19,12 @@ type ViewState = 'dashboard' | 'calendar' | 'planner' | 'habits' | 'team';
 
 export default function App() {
   const [currentView, setCurrentView] = useState<ViewState>('dashboard');
-  const [isAiPanelOpen, setIsAiPanelOpen] = useState(true);
+  // AI panel + sidebar default open on desktop, closed on mobile so they
+  // don't cover the whole screen on first load.
+  const [isAiPanelOpen, setIsAiPanelOpen] = useState(
+    () => typeof window !== 'undefined' && window.innerWidth >= 1024
+  );
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
@@ -60,8 +65,31 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-full bg-[var(--bg-main)] text-[var(--text-primary)] font-sans overflow-hidden selection:bg-[var(--accent-blue)] selection:text-white">
-      {/* Left Sidebar */}
-      <aside className="w-[260px] flex-shrink-0 flex flex-col border-r border-[#2C2C2C] bg-[var(--bg-sidebar)] transition-all duration-300">
+      {/* Mobile sidebar backdrop */}
+      {isSidebarOpen && (
+        <div
+          onClick={() => setIsSidebarOpen(false)}
+          className="fixed inset-0 z-40 bg-black/60 lg:hidden"
+          aria-hidden="true"
+        />
+      )}
+
+      {/* Left Sidebar — off-canvas drawer on mobile, static column on desktop */}
+      <aside
+        className={cn(
+          "fixed lg:static inset-y-0 left-0 z-50 w-[260px] flex-shrink-0 flex flex-col border-r border-[#2C2C2C] bg-[var(--bg-sidebar)] transform transition-transform duration-300 lg:translate-x-0",
+          isSidebarOpen ? "translate-x-0" : "-translate-x-full"
+        )}
+      >
+        {/* Close button (mobile only) */}
+        <button
+          onClick={() => setIsSidebarOpen(false)}
+          className="lg:hidden absolute top-3 right-3 z-10 p-1.5 rounded-md hover:bg-white/10 text-[var(--text-muted)] hover:text-white transition-colors"
+          aria-label="Close menu"
+        >
+          <X className="w-4 h-4" />
+        </button>
+
         {/* Workspace Switcher */}
         <div className="h-14 flex items-center px-4 hover:bg-[var(--bg-hover)] cursor-pointer transition-colors border-b border-[#2C2C2C] group">
           {user ? (
@@ -121,7 +149,10 @@ export default function App() {
             return (
               <button
                 key={item.id}
-                onClick={() => setCurrentView(item.id as ViewState)}
+                onClick={() => {
+                  setCurrentView(item.id as ViewState);
+                  setIsSidebarOpen(false);
+                }}
                 className={cn(
                   "w-full flex items-center gap-3 px-2 py-1.5 rounded text-sm font-medium transition-all group",
                   isActive 
@@ -160,8 +191,15 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="flex-1 flex flex-col min-w-0 relative h-full">
-        <header className="h-14 flex items-center justify-between px-6 border-b border-transparent shrink-0">
-          <div className="flex items-center gap-2">
+        <header className="h-14 flex items-center justify-between px-4 sm:px-6 border-b border-transparent shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <button
+              onClick={() => setIsSidebarOpen(true)}
+              className="lg:hidden p-1.5 -ml-1.5 rounded-md hover:bg-white/10 text-[var(--text-secondary)] hover:text-white transition-colors"
+              aria-label="Open menu"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
             <span className="text-sm font-medium text-[var(--text-secondary)] truncate">
               {navigation.find(n => n.id === currentView)?.name}
             </span>
@@ -180,7 +218,7 @@ export default function App() {
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto px-8 pb-12 pt-2 scroll-smooth">
+        <div className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 pb-12 pt-2 scroll-smooth">
           <AnimatePresence mode="wait">
             <motion.div
               key={currentView}
@@ -200,18 +238,31 @@ export default function App() {
         </div>
       </main>
 
-      {/* Right AI Assistant Panel */}
+      {/* Right AI Assistant Panel — full-screen overlay on mobile, side column on desktop */}
       <AnimatePresence>
         {isAiPanelOpen && (
-          <motion.aside
-            initial={{ width: 0, opacity: 0 }}
-            animate={{ width: 340, opacity: 1 }}
-            exit={{ width: 0, opacity: 0 }}
-            transition={{ duration: 0.2, ease: "easeOut" }}
-            className="flex-shrink-0 border-l border-[#2C2C2C] bg-[#1C1C1C] flex flex-col h-full"
-          >
-             <AIChatPanel onClose={() => setIsAiPanelOpen(false)} />
-          </motion.aside>
+          <>
+            <motion.div
+              key="ai-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              onClick={() => setIsAiPanelOpen(false)}
+              className="fixed inset-0 z-40 bg-black/60 lg:hidden"
+              aria-hidden="true"
+            />
+            <motion.aside
+              key="ai-panel"
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ duration: 0.25, ease: "easeOut" }}
+              className="fixed lg:static inset-y-0 right-0 z-50 w-full sm:w-[400px] lg:w-[340px] flex-shrink-0 border-l border-[#2C2C2C] bg-[#1C1C1C] flex flex-col h-full"
+            >
+              <AIChatPanel onClose={() => setIsAiPanelOpen(false)} />
+            </motion.aside>
+          </>
         )}
       </AnimatePresence>
 

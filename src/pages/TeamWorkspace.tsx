@@ -24,9 +24,9 @@ export default function TeamWorkspace() {
 
   return (
     <div className="h-full flex flex-col">
-      <header className="pt-4 pb-6 border-b border-[#2C2C2C] flex items-center justify-between shrink-0">
+      <header className="pt-4 pb-6 border-b border-[#2C2C2C] flex flex-wrap items-center justify-between gap-4 shrink-0">
         <div>
-          <h1 className="text-3xl font-semibold mb-2">Team Workspace</h1>
+          <h1 className="text-2xl sm:text-3xl font-semibold mb-2">Team Workspace</h1>
           <p className="text-[var(--text-secondary)]">Collaborate on group projects and assignments.</p>
         </div>
         <div className="flex -space-x-2">

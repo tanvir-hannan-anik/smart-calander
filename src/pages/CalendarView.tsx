@@ -87,9 +87,9 @@ export default function CalendarView() {
   return (
     <div className="flex flex-col h-full bg-[var(--bg-main)] relative">
       {/* Header */}
-      <header className="flex items-center justify-between mb-6 border-b border-[#2C2C2C] pb-4">
-        <div className="flex items-center gap-4">
-          <h1 className="text-2xl font-bold">{format(currentDate, 'MMMM yyyy')}</h1>
+      <header className="flex flex-wrap items-center justify-between gap-3 mb-6 border-b border-[#2C2C2C] pb-4">
+        <div className="flex items-center gap-3 sm:gap-4">
+          <h1 className="text-xl sm:text-2xl font-bold">{format(currentDate, 'MMMM yyyy')}</h1>
           <div className="flex items-center gap-1 bg-[#222] rounded-md p-1 border border-[#333]">
             <button onClick={prevWeek} className="p-1 hover:bg-[#333] rounded transition-colors"><ChevronLeft className="w-4 h-4" /></button>
             <button onClick={today} className="px-3 py-1 text-sm font-medium hover:bg-[#333] rounded transition-colors">Today</button>
@@ -112,8 +112,9 @@ export default function CalendarView() {
         </div>
       </header>
 
-      {/* Week Grid */}
-      <div className="flex-1 flex flex-col min-h-0 border border-[#333] rounded-xl overflow-hidden bg-[#1A1A1A]">
+      {/* Week Grid — scrolls horizontally on small screens so columns stay readable */}
+      <div className="flex-1 min-h-0 overflow-x-auto">
+       <div className="h-full min-w-[680px] lg:min-w-0 flex flex-col border border-[#333] rounded-xl overflow-hidden bg-[#1A1A1A]">
         {/* Days Header */}
         <div className="grid grid-cols-7 border-b border-[#333] bg-[#222]">
           {days.map((day, i) => (
@@ -170,6 +171,7 @@ export default function CalendarView() {
             ))}
           </div>
         </div>
+       </div>
       </div>
 
       {/* New Event Modal */}

@@ -108,11 +108,21 @@ export default function AIChatPanel({ onClose }: { onClose: () => void }) {
   const executeAction = async (msgIndex: number, action: AIAction) => {
     try {
       if (action.type === 'create_event' && action.data) {
-        const { title, date, startHour, endHour, description } = action.data;
-        const start = new Date(date || new Date());
-        start.setHours(startHour || 10, 0, 0, 0);
+        const { title, date, startHour, startMinute, endHour, endMinute, description } = action.data;
+        // Build the date from parts so a "YYYY-MM-DD" string isn't parsed as
+        // UTC midnight (which can shift the day in non-UTC timezones).
+        const parts = typeof date === 'string' ? date.split('-').map(Number) : [];
+        const start = parts.length === 3 && parts[0]
+          ? new Date(parts[0], parts[1] - 1, parts[2])
+          : new Date();
+        start.setHours(startHour ?? 10, startMinute ?? 0, 0, 0);
         const end = new Date(start);
-        end.setHours(endHour || 12, 0, 0, 0);
+        if (typeof endHour === 'number') {
+          end.setHours(endHour, endMinute ?? 0, 0, 0);
+          if (end <= start) end.setTime(start.getTime() + 60 * 60 * 1000);
+        } else {
+          end.setTime(start.getTime() + 60 * 60 * 1000);
+        }
 
         await createCalendarEvent(title || 'New Event', start, end, description || '');
         setMessages(prev => prev.map((m, i) => i === msgIndex ? { ...m, actionExecuted: true } : m));

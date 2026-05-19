@@ -71,9 +71,9 @@ export default function StudyPlanner() {
 
   return (
     <div className="max-w-5xl mx-auto space-y-8">
-       <header className="pt-4 pb-6 border-b border-[#2C2C2C] flex items-center justify-between">
+       <header className="pt-4 pb-6 border-b border-[#2C2C2C] flex flex-wrap items-center justify-between gap-4">
          <div>
-           <h1 className="text-3xl font-semibold mb-2">Study Planner</h1>
+           <h1 className="text-2xl sm:text-3xl font-semibold mb-2">Study Planner</h1>
            <p className="text-[var(--text-secondary)]">Organize your study sessions and track your progress.</p>
          </div>
          <button 
