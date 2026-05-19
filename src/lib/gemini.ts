@@ -3,8 +3,16 @@ import { GoogleGenAI, Type } from '@google/genai';
 
 const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
 
+export type AIActionType =
+  | 'create_event'
+  | 'create_task' | 'delete_task'
+  | 'generate_study_plan' | 'add_subject' | 'add_study_session' | 'delete_subject'
+  | 'add_habit' | 'checkin_habit' | 'delete_habit'
+  | 'add_team_task' | 'move_team_task' | 'delete_team_task'
+  | 'general';
+
 export interface AIAction {
-  type: 'create_event' | 'create_task' | 'generate_study_plan' | 'general';
+  type: AIActionType;
   data?: any;
 }
 
@@ -25,13 +33,46 @@ When a user asks you to:
    \`\`\`action
    {"type":"create_task","data":{"title":"...","tag":"...","time":"HH:MM AM - HH:MM PM"}}
    \`\`\`
-3. **Generate a study plan**: Respond with a structured plan and include:
-   \`\`\`action
-   {"type":"generate_study_plan","data":{"subjects":[{"title":"...","sessions":[{"day":"Monday","topic":"...","hours":2}]}]}}
+3. **Delete a task**: \`\`\`action
+   {"type":"delete_task","data":{"title":"<existing task title>"}}
    \`\`\`
-4. **General questions**: Just respond naturally without any action block.
+4. **Generate a study plan**: \`\`\`action
+   {"type":"generate_study_plan","data":{"subjects":[{"title":"...","color":"blue","sessions":[{"day":"Monday","topic":"...","hours":2}]}]}}
+   \`\`\`
+5. **Add a study subject**: \`\`\`action
+   {"type":"add_subject","data":{"title":"...","color":"blue"}}
+   \`\`\`
+6. **Add a study session** to an existing subject: \`\`\`action
+   {"type":"add_study_session","data":{"subject":"<existing subject title>","day":"Monday","topic":"...","hours":2}}
+   \`\`\`
+7. **Delete a study subject**: \`\`\`action
+   {"type":"delete_subject","data":{"title":"<existing subject title>"}}
+   \`\`\`
+8. **Add a habit**: \`\`\`action
+   {"type":"add_habit","data":{"name":"...","icon":"✨","color":"green"}}
+   \`\`\`
+9. **Check in / mark a habit done today**: \`\`\`action
+   {"type":"checkin_habit","data":{"name":"<existing habit name>"}}
+   \`\`\`
+10. **Delete a habit**: \`\`\`action
+   {"type":"delete_habit","data":{"name":"<existing habit name>"}}
+   \`\`\`
+11. **Add a team task**: \`\`\`action
+   {"type":"add_team_task","data":{"title":"...","assignee":"...","label":"General","status":"todo"}}
+   \`\`\`
+12. **Move a team task** (status: todo | in-progress | done): \`\`\`action
+   {"type":"move_team_task","data":{"title":"<existing team task title>","status":"done"}}
+   \`\`\`
+13. **Delete a team task**: \`\`\`action
+   {"type":"delete_team_task","data":{"title":"<existing team task title>"}}
+   \`\`\`
+14. **General questions**: Just respond naturally without any action block.
 
-Be concise, friendly, and proactive. Always suggest concrete next steps. Use emojis sparingly but effectively.
+Rules:
+- Output AT MOST ONE \`\`\`action\`\`\` block per reply, as valid minified JSON.
+- For delete/move/checkin actions, use the EXACT existing names shown in the "Current data" context below; never invent IDs.
+- colors must be one of: blue, purple, green, orange, red, cyan. days are full names (Monday…Sunday).
+Be concise, friendly, and proactive. Use emojis sparingly.
 Today's date is ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}.`;
 
 /**
@@ -247,15 +288,18 @@ export function resetChat() {
   chatHistory = [];
 }
 
-export async function sendMessage(userMessage: string): Promise<AIResponse> {
+export async function sendMessage(userMessage: string, context?: string): Promise<AIResponse> {
   chatHistory.push({
     role: 'user',
     parts: [{ text: userMessage }],
   });
 
   try {
+    const systemParts = [{ text: SYSTEM_PROMPT }];
+    if (context) systemParts.push({ text: `\n\nCurrent data (use these exact names for delete/move/checkin):\n${context}` });
+
     const response = await generateContentWithFallback([
-      { role: 'user', parts: [{ text: SYSTEM_PROMPT }] },
+      { role: 'user', parts: systemParts },
       { role: 'model', parts: [{ text: 'Understood! I\'m Cal AI, ready to help you manage your schedule and productivity. How can I help you today?' }] },
       ...chatHistory,
     ]);

@@ -2,9 +2,34 @@ import { useState, useRef, useEffect } from 'react';
 import { Bot, Sparkles, Send, CalendarPlus, Check, X, Mic, Square, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
-import { createCalendarEvent } from '../lib/calendar';
+import { createCalendarEvent, describeReminders, CalendarAuthError } from '../lib/calendar';
 import { sendMessage, resetChat, type AIResponse, type AIAction } from '../lib/gemini';
-import { useTasks } from '../lib/store';
+import { useTasks, useHabits, useStudyPlanner, useTeam } from '../lib/store';
+
+const findByName = <T extends Record<string, any>>(items: T[], key: keyof T, name?: string): T | undefined => {
+  if (!name) return undefined;
+  const n = String(name).trim().toLowerCase();
+  return items.find(i => String(i[key]).toLowerCase() === n)
+    || items.find(i => String(i[key]).toLowerCase().includes(n));
+};
+const HABIT_ICONS = ['✨', '🔥', '💪', '🧠', '🎯', '📈', '🌱'];
+const COLORS = ['blue', 'purple', 'green', 'orange', 'red', 'cyan'];
+const randOf = <T,>(a: T[]) => a[Math.floor(Math.random() * a.length)];
+const ACTION_LABELS: Record<string, string> = {
+  create_event: '📅 Create Event',
+  create_task: '✅ Create Task',
+  delete_task: '🗑️ Delete Task',
+  generate_study_plan: '📚 Study Plan',
+  add_subject: '📘 Add Subject',
+  add_study_session: '📝 Add Session',
+  delete_subject: '🗑️ Delete Subject',
+  add_habit: '🔁 Add Habit',
+  checkin_habit: '🔥 Check-in Habit',
+  delete_habit: '🗑️ Delete Habit',
+  add_team_task: '👥 Add Team Task',
+  move_team_task: '↔️ Move Team Task',
+  delete_team_task: '🗑️ Delete Team Task',
+};
 
 declare global {
   interface Window {
@@ -31,7 +56,19 @@ export default function AIChatPanel({ onClose }: { onClose: () => void }) {
   const recognitionRef = useRef<any>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const { addTask } = useTasks();
+  const { tasks, addTask, deleteTask } = useTasks();
+  const { habits, addHabit, toggleCheckin, deleteHabit } = useHabits();
+  const { subjects, addSubject, deleteSubject, addSession } = useStudyPlanner();
+  const { tasks: teamTasks, addTeamTask, moveTask, deleteTeamTask } = useTeam();
+
+  const buildContext = () => {
+    const lines: string[] = [];
+    if (tasks.length) lines.push(`Tasks: ${tasks.map(t => t.title).join(' | ')}`);
+    if (habits.length) lines.push(`Habits: ${habits.map(h => h.name).join(' | ')}`);
+    if (subjects.length) lines.push(`Subjects: ${subjects.map(s => s.title).join(' | ')}`);
+    if (teamTasks.length) lines.push(`Team tasks: ${teamTasks.map(t => `${t.title} (${t.status})`).join(' | ')}`);
+    return lines.join('\n');
+  };
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
@@ -88,7 +125,7 @@ export default function AIChatPanel({ onClose }: { onClose: () => void }) {
     setIsLoading(true);
 
     try {
-      const response = await sendMessage(input);
+      const response = await sendMessage(input, buildContext());
       const assistantMsg: ChatMessage = {
         role: 'assistant',
         text: response.message,
@@ -105,36 +142,123 @@ export default function AIChatPanel({ onClose }: { onClose: () => void }) {
     }
   };
 
-  const executeAction = async (msgIndex: number, action: AIAction) => {
-    try {
-      if (action.type === 'create_event' && action.data) {
-        const { title, date, startHour, startMinute, endHour, endMinute, description } = action.data;
-        // Build the date from parts so a "YYYY-MM-DD" string isn't parsed as
-        // UTC midnight (which can shift the day in non-UTC timezones).
-        const parts = typeof date === 'string' ? date.split('-').map(Number) : [];
-        const start = parts.length === 3 && parts[0]
-          ? new Date(parts[0], parts[1] - 1, parts[2])
-          : new Date();
-        start.setHours(startHour ?? 10, startMinute ?? 0, 0, 0);
-        const end = new Date(start);
-        if (typeof endHour === 'number') {
-          end.setHours(endHour, endMinute ?? 0, 0, 0);
-          if (end <= start) end.setTime(start.getTime() + 60 * 60 * 1000);
-        } else {
-          end.setTime(start.getTime() + 60 * 60 * 1000);
-        }
+  const reply = (msgIndex: number, text: string) => {
+    setMessages(prev => prev.map((m, i) => i === msgIndex ? { ...m, actionExecuted: true } : m));
+    setMessages(prev => [...prev, { role: 'assistant', text }]);
+  };
 
-        await createCalendarEvent(title || 'New Event', start, end, description || '');
-        setMessages(prev => prev.map((m, i) => i === msgIndex ? { ...m, actionExecuted: true } : m));
-        setMessages(prev => [...prev, { role: 'assistant', text: `✅ Event "${title}" has been added to your Google Calendar!` }]);
-      } else if (action.type === 'create_task' && action.data) {
-        const { title, tag, time } = action.data;
-        addTask(title || 'New Task', time || '', tag || '');
-        setMessages(prev => prev.map((m, i) => i === msgIndex ? { ...m, actionExecuted: true } : m));
-        setMessages(prev => [...prev, { role: 'assistant', text: `✅ Task "${title}" has been added to your task list!` }]);
+  const executeAction = async (msgIndex: number, action: AIAction) => {
+    const d = action.data || {};
+    try {
+      switch (action.type) {
+        case 'create_event': {
+          const parts = typeof d.date === 'string' ? d.date.split('-').map(Number) : [];
+          const start = parts.length === 3 && parts[0]
+            ? new Date(parts[0], parts[1] - 1, parts[2])
+            : new Date();
+          start.setHours(d.startHour ?? 10, d.startMinute ?? 0, 0, 0);
+          const end = new Date(start);
+          if (typeof d.endHour === 'number') {
+            end.setHours(d.endHour, d.endMinute ?? 0, 0, 0);
+            if (end <= start) end.setTime(start.getTime() + 3_600_000);
+          } else {
+            end.setTime(start.getTime() + 3_600_000);
+          }
+          await createCalendarEvent(d.title || 'New Event', start, end, d.description || '');
+          const when = start.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+          reply(msgIndex, `✅ "${d.title}" saved to your Google Calendar for ${when}.\n🔔 Reminders set automatically: ${describeReminders()}.`);
+          break;
+        }
+        case 'create_task':
+          addTask(d.title || 'New Task', d.time || '', d.tag || '');
+          reply(msgIndex, `✅ Task "${d.title}" added to your task list.`);
+          break;
+        case 'delete_task': {
+          const t = findByName(tasks, 'title', d.title);
+          if (!t) throw new Error(`No task named "${d.title}" found.`);
+          deleteTask(t.id);
+          reply(msgIndex, `🗑️ Task "${t.title}" deleted.`);
+          break;
+        }
+        case 'add_subject':
+          addSubject(d.title || 'New Subject', COLORS.includes(d.color) ? d.color : randOf(COLORS));
+          reply(msgIndex, `✅ Subject "${d.title}" added to your Study Planner.`);
+          break;
+        case 'delete_subject': {
+          const s = findByName(subjects, 'title', d.title);
+          if (!s) throw new Error(`No subject named "${d.title}" found.`);
+          deleteSubject(s.id);
+          reply(msgIndex, `🗑️ Subject "${s.title}" deleted.`);
+          break;
+        }
+        case 'add_study_session': {
+          const s = findByName(subjects, 'title', d.subject);
+          if (!s) throw new Error(`No subject named "${d.subject}" found. Add the subject first.`);
+          addSession(s.id, d.topic || 'New Session', d.day || 'Monday', Number(d.hours) || 1);
+          reply(msgIndex, `✅ Session "${d.topic}" added to ${s.title} on ${d.day || 'Monday'}.`);
+          break;
+        }
+        case 'generate_study_plan': {
+          const subs = Array.isArray(d.subjects) ? d.subjects : [];
+          let count = 0;
+          subs.forEach((sub: any) => {
+            const created = addSubject(sub.title || 'New Subject', COLORS.includes(sub.color) ? sub.color : randOf(COLORS));
+            (sub.sessions || []).forEach((se: any) => {
+              addSession(created.id, se.topic || 'Session', se.day || 'Monday', Number(se.hours) || 1);
+              count++;
+            });
+          });
+          reply(msgIndex, `✅ Study plan created: ${subs.length} subject(s), ${count} session(s) added to your Study Planner.`);
+          break;
+        }
+        case 'add_habit':
+          addHabit(d.name || 'New Habit', COLORS.includes(d.color) ? d.color : randOf(COLORS), d.icon || randOf(HABIT_ICONS));
+          reply(msgIndex, `✅ Habit "${d.name}" added. Keep your streak going!`);
+          break;
+        case 'checkin_habit': {
+          const h = findByName(habits, 'name', d.name);
+          if (!h) throw new Error(`No habit named "${d.name}" found.`);
+          if (!h.checkins.includes(new Date().toISOString().split('T')[0])) toggleCheckin(h.id);
+          reply(msgIndex, `✅ Checked in "${h.name}" for today. 🔥`);
+          break;
+        }
+        case 'delete_habit': {
+          const h = findByName(habits, 'name', d.name);
+          if (!h) throw new Error(`No habit named "${d.name}" found.`);
+          deleteHabit(h.id);
+          reply(msgIndex, `🗑️ Habit "${h.name}" deleted.`);
+          break;
+        }
+        case 'add_team_task': {
+          const created = addTeamTask(d.title || 'New Task', d.assignee || 'Unassigned', d.label || 'General');
+          const status = ['todo', 'in-progress', 'done'].includes(d.status) ? d.status : 'todo';
+          if (status !== 'todo') moveTask(created.id, status);
+          reply(msgIndex, `✅ Team task "${d.title}" added to ${status}.`);
+          break;
+        }
+        case 'move_team_task': {
+          const t = findByName(teamTasks, 'title', d.title);
+          if (!t) throw new Error(`No team task named "${d.title}" found.`);
+          const status = ['todo', 'in-progress', 'done'].includes(d.status) ? d.status : 'done';
+          moveTask(t.id, status);
+          reply(msgIndex, `✅ Moved "${t.title}" to ${status}.`);
+          break;
+        }
+        case 'delete_team_task': {
+          const t = findByName(teamTasks, 'title', d.title);
+          if (!t) throw new Error(`No team task named "${d.title}" found.`);
+          deleteTeamTask(t.id);
+          reply(msgIndex, `🗑️ Team task "${t.title}" deleted.`);
+          break;
+        }
+        default:
+          setMessages(prev => [...prev, { role: 'assistant', text: 'I prepared an action but could not recognise its type.' }]);
       }
     } catch (err: any) {
-      setMessages(prev => [...prev, { role: 'assistant', text: `❌ Error: ${err.message || 'Action failed. Please make sure you are signed in.'}` }]);
+      const text = err instanceof CalendarAuthError
+        ? `🔌 Google Calendar isn't connected. Open the **Calendar** tab and click "Connect Google Calendar", then try this action again.`
+        : `❌ ${err?.message || 'Action failed. Please make sure you are signed in.'}`;
+      setMessages(prev => [...prev, { role: 'assistant', text }]);
     }
   };
 
@@ -192,12 +316,12 @@ export default function AIChatPanel({ onClose }: { onClose: () => void }) {
                 {msg.action && !msg.actionExecuted && (
                   <div className="mt-3 bg-[#1e1e1e] border border-[#3a3a3a] rounded-md p-2 flex flex-col gap-2">
                     <span className="text-xs font-semibold uppercase text-gray-400 tracking-wider">
-                      {msg.action.type === 'create_event' ? '📅 Create Event' : 
-                       msg.action.type === 'create_task' ? '✅ Create Task' :
-                       msg.action.type === 'generate_study_plan' ? '📚 Study Plan' : 'Action'}
+                      {ACTION_LABELS[msg.action.type] || '⚙️ Action'}
                     </span>
-                    {msg.action.data?.title && (
-                      <span className="text-xs text-gray-300">{msg.action.data.title}</span>
+                    {(msg.action.data?.title || msg.action.data?.name || msg.action.data?.subject) && (
+                      <span className="text-xs text-gray-300">
+                        {msg.action.data.title || msg.action.data.name || msg.action.data.subject}
+                      </span>
                     )}
                     <button 
                       onClick={() => executeAction(i, msg.action!)}

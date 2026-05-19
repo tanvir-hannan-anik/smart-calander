@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Play, MoreVertical, Plus, GripVertical, CheckCircle2, X } from 'lucide-react';
+import { Play, Trash2, Plus, CheckCircle2, X } from 'lucide-react';
 import { useStudyPlanner } from '../lib/store';
 import { createCalendarEvent } from '../lib/calendar';
 
@@ -13,13 +13,22 @@ const colorMap: Record<string, { border: string, bg: string, text: string }> = {
 };
 
 export default function StudyPlanner() {
-  const { subjects, addSubject, addSession, toggleSession, deleteSession, getProgress } = useStudyPlanner();
+  const { subjects, addSubject, deleteSubject, addSession, toggleSession, deleteSession, getProgress } = useStudyPlanner();
   
   const [isAddingSubject, setIsAddingSubject] = useState(false);
   const [newSubjectTitle, setNewSubjectTitle] = useState('');
   
-  const [isAddingSession, setIsAddingSession] = useState<string | null>(null); // subjectId
-  const [newSessionTitle, setNewSessionTitle] = useState('');
+  const [isAddingSession, setIsAddingSession] = useState<string | null>(null); // day
+  const [sessionDraft, setSessionDraft] = useState({ subjectId: '', topic: '' });
+
+  const openAddSession = (day: string) => {
+    setSessionDraft({ subjectId: subjects[0]?.id || '', topic: '' });
+    setIsAddingSession(day);
+  };
+  const cancelAddSession = () => {
+    setIsAddingSession(null);
+    setSessionDraft({ subjectId: '', topic: '' });
+  };
 
   const [isSyncing, setIsSyncing] = useState(false);
 
@@ -33,10 +42,11 @@ export default function StudyPlanner() {
     }
   };
 
-  const handleAddSession = (subjectId: string, day: string) => {
-    if (newSessionTitle.trim()) {
-      addSession(subjectId, newSessionTitle.trim(), day, 1);
-      setNewSessionTitle('');
+  const handleAddSession = (day: string) => {
+    const { subjectId, topic } = sessionDraft;
+    if (subjectId && topic.trim()) {
+      addSession(subjectId, topic.trim(), day, 1);
+      setSessionDraft({ subjectId: '', topic: '' });
       setIsAddingSession(null);
     }
   };
@@ -92,9 +102,15 @@ export default function StudyPlanner() {
             <div className="space-y-3">
                {subjects.map((s) => (
                   <div key={s.id} className={`p-4 rounded-xl border border-[#333] bg-[#222] border-l-4 ${colorMap[s.color]?.border || 'border-blue-500'}`}>
-                     <div className="flex justify-between items-center mb-3">
-                        <span className="font-medium text-sm">{s.title}</span>
-                        <MoreVertical className="w-4 h-4 text-gray-500 cursor-pointer hover:text-white" />
+                     <div className="flex justify-between items-center mb-3 group">
+                        <span className="font-medium text-sm truncate">{s.title}</span>
+                        <button
+                          onClick={() => deleteSubject(s.id)}
+                          className="text-gray-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                          aria-label={`Delete ${s.title}`}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                      </div>
                      <div className="w-full bg-[#111] rounded-full h-1.5 overflow-hidden">
                         <div className={`h-full ${colorMap[s.color]?.bg || 'bg-blue-500'}`} style={{ width: `${getProgress(s.id)}%` }}></div>
@@ -161,32 +177,39 @@ export default function StudyPlanner() {
 
                         {isAddingSession === day ? (
                           <div className="bg-[#2a2a2a] p-2 rounded-lg border border-blue-500">
-                             <select className="w-full bg-[#111] text-xs p-1 rounded border border-[#444] mb-2 outline-none" onChange={(e) => setNewSessionTitle(e.target.value)}>
-                               <option value="">Select subject...</option>
+                             <select
+                               value={sessionDraft.subjectId}
+                               onChange={e => setSessionDraft(d => ({ ...d, subjectId: e.target.value }))}
+                               className="w-full bg-[#111] text-xs p-1.5 rounded border border-[#444] mb-2 outline-none text-white"
+                             >
+                               <option value="">Select subject…</option>
                                {subjects.map(s => <option key={s.id} value={s.id}>{s.title}</option>)}
                              </select>
                              <input
                                autoFocus
                                type="text"
-                               onChange={(e) => {
-                                 // Simple hack for now to store both subject and topic in state temporarily
-                                 // Usually you'd use a more complex state object here
-                               }}
+                               value={sessionDraft.topic}
+                               onChange={e => setSessionDraft(d => ({ ...d, topic: e.target.value }))}
                                onKeyDown={e => {
-                                 if (e.key === 'Enter') {
-                                    const select = e.currentTarget.previousElementSibling as HTMLSelectElement;
-                                    if (select.value) handleAddSession(select.value, day);
-                                 }
+                                 if (e.key === 'Enter') handleAddSession(day);
+                                 if (e.key === 'Escape') cancelAddSession();
                                }}
-                               placeholder="Topic (press enter)"
+                               placeholder="Topic (e.g. Ch 3: Trees)"
                                className="w-full bg-transparent text-sm outline-none mb-1 text-white placeholder-gray-500"
                              />
-                             <div className="flex justify-end mt-1">
-                                <button onClick={() => setIsAddingSession(null)} className="text-gray-500 hover:text-white"><X className="w-4 h-4" /></button>
+                             <div className="flex justify-end items-center gap-2 mt-1">
+                                <button onClick={cancelAddSession} className="text-gray-500 hover:text-white"><X className="w-4 h-4" /></button>
+                                <button
+                                  onClick={() => handleAddSession(day)}
+                                  disabled={!sessionDraft.subjectId || !sessionDraft.topic.trim()}
+                                  className="text-blue-400 hover:text-blue-300 disabled:opacity-40 text-xs font-medium"
+                                >
+                                  Add
+                                </button>
                              </div>
                           </div>
                         ) : (
-                          <button onClick={() => setIsAddingSession(day)} className="w-full py-2 flex justify-center text-[var(--text-muted)] hover:text-white transition-colors bg-[#222] rounded-lg border border-dashed border-[#333] hover:border-gray-500">
+                          <button onClick={() => openAddSession(day)} className="w-full py-2 flex justify-center text-[var(--text-muted)] hover:text-white transition-colors bg-[#222] rounded-lg border border-dashed border-[#333] hover:border-gray-500">
                              <Plus className="w-4 h-4" />
                           </button>
                         )}

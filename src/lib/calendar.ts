@@ -1,4 +1,4 @@
-import { getAccessToken } from './auth';
+import { getAccessToken, clearCalendarToken } from './auth';
 
 export interface CalendarEvent {
   id: string;
@@ -8,56 +8,109 @@ export interface CalendarEvent {
   end: { dateTime: string; timeZone?: string };
 }
 
-export const listUpcomingEvents = async (): Promise<CalendarEvent[]> => {
-  const token = await getAccessToken();
-  if (!token) throw new Error('Not authenticated');
+export interface EventReminder {
+  method: 'popup' | 'email';
+  minutes: number;
+}
 
-  const timeMin = new Date().toISOString();
-  
-  // We specify timeMin to get upcoming events, maxResults to limit it, singleEvents to expand recurring
-  const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${encodeURIComponent(timeMin)}&maxResults=20&orderBy=startTime&singleEvents=true`;
-  
-  const res = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${token}`
-    }
-  });
+/**
+ * Reminders attached automatically to every event we create.
+ * Chosen default: an email 1 day before + a popup 30 min before.
+ */
+export const DEFAULT_REMINDERS: EventReminder[] = [
+  { method: 'email', minutes: 24 * 60 },
+  { method: 'popup', minutes: 30 },
+];
 
-  if (!res.ok) {
-    throw new Error('Failed to fetch calendar events');
+/** Thrown when the Google Calendar token is missing/expired/denied. */
+export class CalendarAuthError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CalendarAuthError';
   }
+}
+
+const localTimeZone =
+  Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+
+async function authHeader(): Promise<string> {
+  const token = await getAccessToken();
+  if (!token) {
+    throw new CalendarAuthError('Your Google Calendar session has expired. Please reconnect your Google account.');
+  }
+  return `Bearer ${token}`;
+}
+
+async function handleErrorResponse(res: Response): Promise<never> {
+  let detail = '';
+  try {
+    const body = await res.json();
+    detail = body?.error?.message || '';
+  } catch { /* ignore */ }
+
+  if (res.status === 401) {
+    clearCalendarToken();
+    throw new CalendarAuthError('Your Google Calendar session expired. Please reconnect your Google account.');
+  }
+  if (res.status === 403) {
+    clearCalendarToken();
+    throw new CalendarAuthError(
+      detail.includes('insufficient')
+        ? 'Calendar permission was not granted. Please reconnect and allow calendar access.'
+        : 'Google Calendar access was denied. Reconnect your account (and ensure the Calendar API is enabled).'
+    );
+  }
+  throw new Error(detail || `Google Calendar request failed (${res.status}).`);
+}
+
+export const listUpcomingEvents = async (): Promise<CalendarEvent[]> => {
+  const Authorization = await authHeader();
+  const timeMin = new Date().toISOString();
+  const url =
+    `https://www.googleapis.com/calendar/v3/calendars/primary/events` +
+    `?timeMin=${encodeURIComponent(timeMin)}&maxResults=50&orderBy=startTime&singleEvents=true`;
+
+  const res = await fetch(url, { headers: { Authorization } });
+  if (!res.ok) await handleErrorResponse(res);
 
   const data = await res.json();
   return data.items || [];
 };
 
-export const createCalendarEvent = async (summary: string, start: Date, end: Date, description: string = '') => {
-  const token = await getAccessToken();
-  if (!token) throw new Error('Not authenticated');
+export const createCalendarEvent = async (
+  summary: string,
+  start: Date,
+  end: Date,
+  description: string = '',
+  reminders: EventReminder[] = DEFAULT_REMINDERS,
+) => {
+  const Authorization = await authHeader();
 
   const event = {
     summary,
     description,
-    start: {
-      dateTime: start.toISOString(),
-    },
-    end: {
-      dateTime: end.toISOString(),
+    start: { dateTime: start.toISOString(), timeZone: localTimeZone },
+    end: { dateTime: end.toISOString(), timeZone: localTimeZone },
+    reminders: {
+      useDefault: false,
+      overrides: reminders.map(r => ({ method: r.method, minutes: r.minutes })),
     },
   };
 
   const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
+    headers: { Authorization, 'Content-Type': 'application/json' },
     body: JSON.stringify(event),
   });
 
-  if (!res.ok) {
-    throw new Error('Failed to create event');
-  }
-
+  if (!res.ok) await handleErrorResponse(res);
   return await res.json();
 };
+
+/** Human-readable summary of the default reminders, for UI hints. */
+export function describeReminders(reminders: EventReminder[] = DEFAULT_REMINDERS): string {
+  const fmt = (m: number) =>
+    m % (24 * 60) === 0 ? `${m / (24 * 60)} day` :
+    m % 60 === 0 ? `${m / 60} hr` : `${m} min`;
+  return reminders.map(r => `${r.method} ${fmt(r.minutes)} before`).join(' · ');
+}

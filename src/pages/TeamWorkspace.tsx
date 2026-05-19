@@ -1,22 +1,31 @@
 import { useState } from 'react';
-import { Plus, GripVertical, CheckCircle2 } from 'lucide-react';
+import { Plus, ChevronLeft, ChevronRight, Trash2, X } from 'lucide-react';
 import { useTeam } from '../lib/store';
 
+type Status = 'todo' | 'in-progress' | 'done';
+const ORDER: Status[] = ['todo', 'in-progress', 'done'];
+
 export default function TeamWorkspace() {
-  const { members, tasks, addMember, addTeamTask, moveTask, deleteTeamTask } = useTeam();
-  
-  const [isAddingTask, setIsAddingTask] = useState<string | null>(null); // column status
+  const { members, tasks, addTeamTask, moveTask, deleteTeamTask } = useTeam();
+
+  const [isAddingTask, setIsAddingTask] = useState<Status | null>(null);
   const [newTaskTitle, setNewTaskTitle] = useState('');
 
-  const handleAddTask = (status: 'todo' | 'in-progress' | 'done') => {
+  const handleAddTask = (status: Status) => {
     if (newTaskTitle.trim()) {
-      addTeamTask(newTaskTitle.trim(), members[0]?.name || 'Unassigned', 'General');
+      const task = addTeamTask(newTaskTitle.trim(), members[0]?.name || 'Unassigned', 'General');
+      if (status !== 'todo') moveTask(task.id, status);
       setNewTaskTitle('');
       setIsAddingTask(null);
     }
   };
 
-  const columns: { id: 'todo' | 'in-progress' | 'done', title: string }[] = [
+  const moveRelative = (id: string, current: Status, dir: -1 | 1) => {
+    const next = ORDER[ORDER.indexOf(current) + dir];
+    if (next) moveTask(id, next);
+  };
+
+  const columns: { id: Status, title: string }[] = [
     { id: 'todo', title: 'To Do' },
     { id: 'in-progress', title: 'In Progress' },
     { id: 'done', title: 'Done' }
@@ -53,25 +62,44 @@ export default function TeamWorkspace() {
             
             <div className="p-3 flex-1 overflow-y-auto space-y-3 hide-scrollbar">
               {tasks.filter(t => t.status === col.id).map(task => (
-                <div key={task.id} className="bg-[#2a2a2a] p-3 rounded-lg border border-[#3a3a3a] group cursor-grab hover:border-gray-500 transition-colors">
-                  <div className="flex justify-between items-start mb-2">
+                <div key={task.id} className="bg-[#2a2a2a] p-3 rounded-lg border border-[#3a3a3a] group hover:border-gray-500 transition-colors">
+                  <div className="flex justify-between items-start mb-2 gap-2">
                     <span className="text-[10px] font-medium tracking-wide uppercase px-2 py-0.5 rounded border border-[#444] text-[var(--text-secondary)]">
                       {task.label}
                     </span>
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      {col.id !== 'done' && (
-                        <button onClick={() => moveTask(task.id, 'done')} className="text-gray-500 hover:text-green-400">
-                          <CheckCircle2 className="w-4 h-4" />
-                        </button>
-                      )}
-                      <GripVertical className="w-4 h-4 text-gray-500" />
-                    </div>
+                    <button
+                      onClick={() => deleteTeamTask(task.id)}
+                      className="text-gray-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                      aria-label="Delete task"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                   <p className="text-sm font-medium mb-3">{task.title}</p>
                   <div className="flex items-center justify-between mt-2 pt-2 border-t border-[#333]">
-                    <span className="text-xs text-gray-500">{task.assignee}</span>
-                    <div className="w-5 h-5 rounded-full bg-blue-500/20 flex items-center justify-center text-[10px]">
-                      {members.find(m => m.name === task.assignee)?.avatar || '👤'}
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-5 h-5 rounded-full bg-blue-500/20 flex items-center justify-center text-[10px]">
+                        {members.find(m => m.name === task.assignee)?.avatar || '👤'}
+                      </div>
+                      <span className="text-xs text-gray-500 truncate max-w-[90px]">{task.assignee}</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => moveRelative(task.id, col.id, -1)}
+                        disabled={col.id === 'todo'}
+                        className="p-1 rounded text-gray-500 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                        aria-label="Move left"
+                      >
+                        <ChevronLeft className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => moveRelative(task.id, col.id, 1)}
+                        disabled={col.id === 'done'}
+                        className="p-1 rounded text-gray-500 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                        aria-label="Move right"
+                      >
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -84,10 +112,23 @@ export default function TeamWorkspace() {
                     type="text"
                     value={newTaskTitle}
                     onChange={e => setNewTaskTitle(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && handleAddTask(col.id)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') handleAddTask(col.id);
+                      if (e.key === 'Escape') { setIsAddingTask(null); setNewTaskTitle(''); }
+                    }}
                     placeholder="Task title..."
                     className="w-full bg-transparent text-sm outline-none mb-1 text-white placeholder-gray-500"
                   />
+                  <div className="flex justify-end items-center gap-2 mt-1">
+                    <button onClick={() => { setIsAddingTask(null); setNewTaskTitle(''); }} className="text-gray-500 hover:text-white"><X className="w-4 h-4" /></button>
+                    <button
+                      onClick={() => handleAddTask(col.id)}
+                      disabled={!newTaskTitle.trim()}
+                      className="text-blue-400 hover:text-blue-300 disabled:opacity-40 text-xs font-medium"
+                    >
+                      Add
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <button 

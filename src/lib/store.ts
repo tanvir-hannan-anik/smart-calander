@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -70,12 +70,45 @@ function loadFromStorage<T>(key: string, fallback: T): T {
   }
 }
 
-function saveToStorage(key: string, data: any): void {
-  localStorage.setItem(key, JSON.stringify(data));
+export function todayStr(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-export function todayStr(): string {
-  return new Date().toISOString().split('T')[0];
+/**
+ * A tiny shared, persisted, subscribable store. Every component (and the AI
+ * chatbot) that uses the same store sees live updates — no more isolated
+ * per-component useState that silently diverged.
+ */
+function createStore<T>(key: string, fallback: T) {
+  let state: T = loadFromStorage(key, fallback);
+  const listeners = new Set<() => void>();
+
+  const get = () => state;
+  const subscribe = (cb: () => void) => {
+    listeners.add(cb);
+    return () => { listeners.delete(cb); };
+  };
+  const set = (updater: T | ((prev: T) => T)) => {
+    state = typeof updater === 'function' ? (updater as (p: T) => T)(state) : updater;
+    try { localStorage.setItem(key, JSON.stringify(state)); } catch { /* ignore */ }
+    listeners.forEach(l => l());
+  };
+
+  // Keep multiple browser tabs in sync.
+  if (typeof window !== 'undefined') {
+    window.addEventListener('storage', e => {
+      if (e.key === key && e.newValue) {
+        try { state = JSON.parse(e.newValue); listeners.forEach(l => l()); } catch { /* ignore */ }
+      }
+    });
+  }
+
+  return { get, set, subscribe };
+}
+
+function useStore<T>(store: { get: () => T; subscribe: (cb: () => void) => () => void }): T {
+  return useSyncExternalStore(store.subscribe, store.get, store.get);
 }
 
 // ─── Default Data ────────────────────────────────────────────────────────────
@@ -131,48 +164,59 @@ const DEFAULT_TEAM_TASKS: TeamTask[] = [
   { id: generateId(), title: 'User research interviews', assignee: 'Sarah', label: 'Research', status: 'in-progress' },
 ];
 
+// ─── Shared store instances ──────────────────────────────────────────────────
+
+const tasksStore = createStore<Task[]>('scm_tasks', DEFAULT_TASKS);
+const habitsStore = createStore<Habit[]>('scm_habits', DEFAULT_HABITS);
+const subjectsStore = createStore<StudySubject[]>('scm_subjects', DEFAULT_SUBJECTS);
+const notesStore = createStore<Note[]>('scm_notes', []);
+const teamMembersStore = createStore<TeamMember[]>('scm_team_members', DEFAULT_TEAM_MEMBERS);
+const teamTasksStore = createStore<TeamTask[]>('scm_team_tasks', DEFAULT_TEAM_TASKS);
+
 // ─── Hooks ───────────────────────────────────────────────────────────────────
 
 export function useTasks() {
-  const [tasks, setTasks] = useState<Task[]>(() => loadFromStorage('scm_tasks', DEFAULT_TASKS));
-
-  useEffect(() => { saveToStorage('scm_tasks', tasks); }, [tasks]);
+  const tasks = useStore(tasksStore);
 
   const addTask = useCallback((title: string, time: string = '', tag: string = '', date?: string) => {
     const task: Task = { id: generateId(), title, time, done: false, tag, date: date || todayStr() };
-    setTasks(prev => [task, ...prev]);
+    tasksStore.set(prev => [task, ...prev]);
     return task;
   }, []);
 
   const toggleTask = useCallback((id: string) => {
-    setTasks(prev => prev.map(t => t.id === id ? { ...t, done: !t.done } : t));
+    tasksStore.set(prev => prev.map(t => t.id === id ? { ...t, done: !t.done } : t));
   }, []);
 
   const deleteTask = useCallback((id: string) => {
-    setTasks(prev => prev.filter(t => t.id !== id));
+    tasksStore.set(prev => prev.filter(t => t.id !== id));
   }, []);
 
   const todayTasks = tasks.filter(t => t.date === todayStr());
-  const completedToday = todayTasks.filter(t => t.done).length;
-  const totalToday = todayTasks.length;
 
-  return { tasks, todayTasks, addTask, toggleTask, deleteTask, completedToday, totalToday };
+  return {
+    tasks,
+    todayTasks,
+    addTask,
+    toggleTask,
+    deleteTask,
+    completedToday: todayTasks.filter(t => t.done).length,
+    totalToday: todayTasks.length,
+  };
 }
 
 export function useHabits() {
-  const [habits, setHabits] = useState<Habit[]>(() => loadFromStorage('scm_habits', DEFAULT_HABITS));
-
-  useEffect(() => { saveToStorage('scm_habits', habits); }, [habits]);
+  const habits = useStore(habitsStore);
 
   const addHabit = useCallback((name: string, color: string, icon: string) => {
     const habit: Habit = { id: generateId(), name, color, icon, checkins: [] };
-    setHabits(prev => [...prev, habit]);
+    habitsStore.set(prev => [...prev, habit]);
     return habit;
   }, []);
 
   const toggleCheckin = useCallback((habitId: string, date?: string) => {
     const d = date || todayStr();
-    setHabits(prev => prev.map(h => {
+    habitsStore.set(prev => prev.map(h => {
       if (h.id !== habitId) return h;
       const has = h.checkins.includes(d);
       return { ...h, checkins: has ? h.checkins.filter(c => c !== d) : [...h.checkins, d] };
@@ -180,18 +224,18 @@ export function useHabits() {
   }, []);
 
   const deleteHabit = useCallback((id: string) => {
-    setHabits(prev => prev.filter(h => h.id !== id));
+    habitsStore.set(prev => prev.filter(h => h.id !== id));
   }, []);
 
   const getStreak = useCallback((habitId: string) => {
-    const habit = habits.find(h => h.id === habitId);
+    const habit = habitsStore.get().find(h => h.id === habitId);
     if (!habit) return 0;
     let streak = 0;
     const today = new Date();
     for (let i = 0; i < 365; i++) {
       const d = new Date(today);
       d.setDate(d.getDate() - i);
-      const ds = d.toISOString().split('T')[0];
+      const ds = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
       if (habit.checkins.includes(ds)) streak++;
       else break;
     }
@@ -202,42 +246,40 @@ export function useHabits() {
 }
 
 export function useStudyPlanner() {
-  const [subjects, setSubjects] = useState<StudySubject[]>(() => loadFromStorage('scm_subjects', DEFAULT_SUBJECTS));
-
-  useEffect(() => { saveToStorage('scm_subjects', subjects); }, [subjects]);
+  const subjects = useStore(subjectsStore);
 
   const addSubject = useCallback((title: string, color: string) => {
     const subject: StudySubject = { id: generateId(), title, color, sessions: [] };
-    setSubjects(prev => [...prev, subject]);
+    subjectsStore.set(prev => [...prev, subject]);
     return subject;
   }, []);
 
   const deleteSubject = useCallback((id: string) => {
-    setSubjects(prev => prev.filter(s => s.id !== id));
+    subjectsStore.set(prev => prev.filter(s => s.id !== id));
   }, []);
 
   const addSession = useCallback((subjectId: string, topic: string, day: string, hours: number) => {
     const session: StudySession = { id: generateId(), topic, day, hours, completed: false };
-    setSubjects(prev => prev.map(s => s.id === subjectId ? { ...s, sessions: [...s.sessions, session] } : s));
+    subjectsStore.set(prev => prev.map(s => s.id === subjectId ? { ...s, sessions: [...s.sessions, session] } : s));
     return session;
   }, []);
 
   const toggleSession = useCallback((subjectId: string, sessionId: string) => {
-    setSubjects(prev => prev.map(s => {
+    subjectsStore.set(prev => prev.map(s => {
       if (s.id !== subjectId) return s;
       return { ...s, sessions: s.sessions.map(ss => ss.id === sessionId ? { ...ss, completed: !ss.completed } : ss) };
     }));
   }, []);
 
   const deleteSession = useCallback((subjectId: string, sessionId: string) => {
-    setSubjects(prev => prev.map(s => {
+    subjectsStore.set(prev => prev.map(s => {
       if (s.id !== subjectId) return s;
       return { ...s, sessions: s.sessions.filter(ss => ss.id !== sessionId) };
     }));
   }, []);
 
   const getProgress = useCallback((subjectId: string) => {
-    const subject = subjects.find(s => s.id === subjectId);
+    const subject = subjectsStore.get().find(s => s.id === subjectId);
     if (!subject || subject.sessions.length === 0) return 0;
     return Math.round((subject.sessions.filter(s => s.completed).length / subject.sessions.length) * 100);
   }, [subjects]);
@@ -246,50 +288,45 @@ export function useStudyPlanner() {
 }
 
 export function useNotes() {
-  const [notes, setNotes] = useState<Note[]>(() => loadFromStorage('scm_notes', []));
-
-  useEffect(() => { saveToStorage('scm_notes', notes); }, [notes]);
+  const notes = useStore(notesStore);
 
   const addNote = useCallback((title: string, content: string = '') => {
     const note: Note = { id: generateId(), title, content, createdAt: new Date().toISOString() };
-    setNotes(prev => [note, ...prev]);
+    notesStore.set(prev => [note, ...prev]);
     return note;
   }, []);
 
   const updateNote = useCallback((id: string, title: string, content: string) => {
-    setNotes(prev => prev.map(n => n.id === id ? { ...n, title, content } : n));
+    notesStore.set(prev => prev.map(n => n.id === id ? { ...n, title, content } : n));
   }, []);
 
   const deleteNote = useCallback((id: string) => {
-    setNotes(prev => prev.filter(n => n.id !== id));
+    notesStore.set(prev => prev.filter(n => n.id !== id));
   }, []);
 
   return { notes, addNote, updateNote, deleteNote };
 }
 
 export function useTeam() {
-  const [members, setMembers] = useState<TeamMember[]>(() => loadFromStorage('scm_team_members', DEFAULT_TEAM_MEMBERS));
-  const [tasks, setTasks] = useState<TeamTask[]>(() => loadFromStorage('scm_team_tasks', DEFAULT_TEAM_TASKS));
-
-  useEffect(() => { saveToStorage('scm_team_members', members); }, [members]);
-  useEffect(() => { saveToStorage('scm_team_tasks', tasks); }, [tasks]);
+  const members = useStore(teamMembersStore);
+  const tasks = useStore(teamTasksStore);
 
   const addMember = useCallback((name: string, avatar: string) => {
-    const member: TeamMember = { id: generateId(), name, avatar };
-    setMembers(prev => [...prev, member]);
+    teamMembersStore.set(prev => [...prev, { id: generateId(), name, avatar }]);
   }, []);
 
   const addTeamTask = useCallback((title: string, assignee: string, label: string) => {
     const task: TeamTask = { id: generateId(), title, assignee, label, status: 'todo' };
-    setTasks(prev => [...prev, task]);
+    teamTasksStore.set(prev => [...prev, task]);
+    return task;
   }, []);
 
   const moveTask = useCallback((id: string, status: TeamTask['status']) => {
-    setTasks(prev => prev.map(t => t.id === id ? { ...t, status } : t));
+    teamTasksStore.set(prev => prev.map(t => t.id === id ? { ...t, status } : t));
   }, []);
 
   const deleteTeamTask = useCallback((id: string) => {
-    setTasks(prev => prev.filter(t => t.id !== id));
+    teamTasksStore.set(prev => prev.filter(t => t.id !== id));
   }, []);
 
   return { members, tasks, addMember, addTeamTask, moveTask, deleteTeamTask };

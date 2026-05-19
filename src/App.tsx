@@ -4,7 +4,7 @@ import {
   Calendar, CheckSquare, Clock, Command,
   Settings, Users, BookOpen, Layers,
   MessageSquare, Sparkles, Mic, Plus, Search,
-  ChevronLeft, LayoutGrid, LogOut, Menu, X
+  ChevronLeft, LayoutGrid, LogOut, Menu, X, Loader2
 } from 'lucide-react';
 import { cn } from './lib/utils';
 import Dashboard from './pages/Dashboard';
@@ -14,6 +14,7 @@ import HabitsView from './pages/HabitsView';
 import TeamWorkspace from './pages/TeamWorkspace';
 import AIChatPanel from './components/AIChatPanel';
 import { logout } from './lib/auth';
+import { AlertTriangle } from 'lucide-react';
 
 type ViewState = 'dashboard' | 'calendar' | 'planner' | 'habits' | 'team';
 
@@ -26,15 +27,20 @@ export default function App() {
   );
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [user, setUser] = useState<any>(null);
+  const [calendarConnected, setCalendarConnected] = useState(false);
+  const [authReady, setAuthReady] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   useEffect(() => {
+    let cleanup: (() => void) | undefined;
     import('./lib/auth').then(({ initAuth }) => {
-      initAuth(
-        (user) => setUser(user),
-        () => setUser(null)
-      );
+      cleanup = initAuth(({ user, calendarConnected, ready }) => {
+        setUser(user);
+        setCalendarConnected(calendarConnected);
+        if (ready) setAuthReady(true);
+      });
     });
+    return () => cleanup?.();
   }, []);
 
   const handleLogin = async () => {
@@ -42,9 +48,25 @@ export default function App() {
     try {
       const { googleSignIn } = await import('./lib/auth');
       const result = await googleSignIn();
-      if (result) setUser(result.user);
+      if (result) {
+        setUser(result.user);
+        setCalendarConnected(true);
+      }
     } catch (err) {
       console.error('Login failed:', err);
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleReconnect = async () => {
+    setIsLoggingIn(true);
+    try {
+      const { reconnectCalendar } = await import('./lib/auth');
+      const ok = await reconnectCalendar();
+      setCalendarConnected(ok);
+    } catch (err) {
+      console.error('Reconnect failed:', err);
     } finally {
       setIsLoggingIn(false);
     }
@@ -53,6 +75,7 @@ export default function App() {
   const handleLogout = async () => {
     await logout();
     setUser(null);
+    setCalendarConnected(false);
   }
 
   const navigation = [
@@ -92,7 +115,11 @@ export default function App() {
 
         {/* Workspace Switcher */}
         <div className="h-14 flex items-center px-4 hover:bg-[var(--bg-hover)] cursor-pointer transition-colors border-b border-[#2C2C2C] group">
-          {user ? (
+          {!authReady ? (
+            <div className="flex-1 flex items-center justify-center gap-2 py-1.5 text-sm text-[var(--text-muted)]">
+              <Loader2 className="w-4 h-4 animate-spin" /> Restoring session…
+            </div>
+          ) : user ? (
             <>
               <div className="w-6 h-6 rounded bg-gradient-to-tr from-blue-600 to-purple-600 flex items-center justify-center text-white text-xs font-bold mr-3 shadow-sm overflow-hidden">
                 {user.photoURL ? <img src={user.photoURL} alt="Avatar" /> : user.email?.charAt(0).toUpperCase()}
@@ -103,8 +130,8 @@ export default function App() {
               </button>
             </>
           ) : (
-            <button 
-              onClick={handleLogin} 
+            <button
+              onClick={handleLogin}
               disabled={isLoggingIn}
               className="flex-1 flex items-center justify-center gap-2 py-1.5 rounded bg-blue-600 hover:bg-blue-500 transition-colors text-sm font-medium text-white shadow-sm"
             >
@@ -205,6 +232,20 @@ export default function App() {
             </span>
           </div>
           <div className="flex items-center gap-3">
+            {user && (
+              <span
+                className={cn(
+                  "hidden sm:flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium",
+                  calendarConnected
+                    ? "bg-green-500/10 text-green-400"
+                    : "bg-amber-500/10 text-amber-400"
+                )}
+                title={calendarConnected ? 'Google Calendar connected' : 'Google Calendar disconnected'}
+              >
+                <Calendar className="w-3.5 h-3.5" />
+                {calendarConnected ? 'Calendar synced' : 'Not synced'}
+              </span>
+            )}
              <button
               onClick={() => setIsAiPanelOpen(!isAiPanelOpen)}
               className={cn(
@@ -217,6 +258,22 @@ export default function App() {
             </button>
           </div>
         </header>
+
+        {user && !calendarConnected && (
+          <div className="mx-4 sm:mx-6 lg:mx-8 mt-2 flex flex-col sm:flex-row sm:items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3">
+            <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+            <p className="text-sm text-amber-200 flex-1">
+              Google Calendar isn't connected. Reconnect to save scheduled work and get automatic reminders.
+            </p>
+            <button
+              onClick={handleReconnect}
+              disabled={isLoggingIn}
+              className="shrink-0 px-3 py-1.5 rounded-md bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-black text-sm font-medium transition-colors"
+            >
+              {isLoggingIn ? 'Connecting…' : 'Reconnect Google Calendar'}
+            </button>
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 pb-12 pt-2 scroll-smooth">
           <AnimatePresence mode="wait">
