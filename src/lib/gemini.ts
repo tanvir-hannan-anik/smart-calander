@@ -87,6 +87,8 @@ export async function sendMessage(userMessage: string): Promise<AIResponse> {
     let errorMessage = 'Failed to connect to Gemini API. Please check your API key.';
     if (error.message?.includes('429') || error.message?.includes('Quota exceeded')) {
       errorMessage = 'You have exceeded your Gemini API quota. Please try again later or check your Google AI Studio billing limits.';
+    } else if (error.message?.includes('403') || error.message?.includes('PERMISSION_DENIED') || error.message?.includes('denied access')) {
+      errorMessage = 'Your Google API key has been denied access or revoked. Please generate a new API key in Google AI Studio and update your .env.local file.';
     } else if (error.message) {
       errorMessage = error.message;
     }
