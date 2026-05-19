@@ -131,7 +131,16 @@ export default function AIChatPanel({ onClose }: { onClose: () => void }) {
         text: response.message,
         action: response.action,
       };
-      setMessages(prev => [...prev, assistantMsg]);
+      let assistantIndex = -1;
+      setMessages(prev => {
+        assistantIndex = prev.length;
+        return [...prev, assistantMsg];
+      });
+      // Auto-execute the action immediately instead of waiting for the user
+      // to click an "Execute Action" button.
+      if (response.action && response.action.type !== 'general' && assistantIndex >= 0) {
+        await executeAction(assistantIndex, response.action);
+      }
     } catch (error: any) {
       setMessages(prev => [...prev, {
         role: 'assistant',

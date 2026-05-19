@@ -102,6 +102,18 @@ export interface AuthState {
 
 let authResolved = false;
 
+// Track which user's data is currently loaded so a restored session + any
+// re-fires of onAuthStateChanged don't re-hydrate (and clobber unsaved edits)
+// for the same user.
+let loadedUid: string | null = null;
+
+async function loadUserSession(uid: string): Promise<void> {
+  if (loadedUid === uid) return;
+  loadedUid = uid;
+  const { beginUserSession } = await import('./store');
+  await beginUserSession(uid);
+}
+
 /**
  * Subscribes to auth changes. Fires on sign-in/out AND on token expiry so the
  * app can show a "Reconnect Google Calendar" prompt while the user stays
@@ -118,6 +130,10 @@ export const initAuth = (onChange: (state: AuthState) => void) => {
       onChange({ user: null, calendarConnected: false, ready: true });
       return;
     }
+    // Whether this is a fresh sign-in or a restored session, load THIS user's
+    // data from the cloud. A brand-new user gets a completely empty workspace
+    // (no demo data); a returning user gets exactly what they had on logout.
+    void loadUserSession(user.uid);
     if (!isSigningIn) {
       // User session was restored from Firebase persistence.
       // Check if we have a valid calendar token in localStorage.
@@ -164,6 +180,15 @@ export const reconnectCalendar = async (): Promise<boolean> => {
 };
 
 export const logout = async () => {
+  // Save the user's latest data to the cloud, then wipe local stores so the
+  // next visitor (or the logged-out demo view) never sees this user's data.
+  try {
+    const { endUserSession } = await import('./store');
+    await endUserSession();
+  } catch (err) {
+    console.error('Failed to persist data on logout:', err);
+  }
+  loadedUid = null;
   clearCalendarToken();
   await signOut(auth);
 };

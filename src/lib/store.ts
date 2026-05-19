@@ -80,7 +80,20 @@ export function todayStr(): string {
  * chatbot) that uses the same store sees live updates — no more isolated
  * per-component useState that silently diverged.
  */
-function createStore<T>(key: string, fallback: T) {
+interface RegisteredStore {
+  /** Replace the store's contents (used by hydrate/reset). Does not re-persist
+   *  beyond the normal set() path. */
+  replace: (value: unknown) => void;
+  /** Current value, for exporting a full snapshot to the cloud. */
+  snapshot: () => unknown;
+  /** The empty value this store resets to for a fresh user. */
+  empty: unknown;
+}
+
+/** Every store registers here so we can hydrate / reset / export them all. */
+const storeRegistry = new Map<string, RegisteredStore>();
+
+function createStore<T>(key: string, fallback: T, empty: T) {
   let state: T = loadFromStorage(key, fallback);
   const listeners = new Set<() => void>();
 
@@ -93,7 +106,18 @@ function createStore<T>(key: string, fallback: T) {
     state = typeof updater === 'function' ? (updater as (p: T) => T)(state) : updater;
     try { localStorage.setItem(key, JSON.stringify(state)); } catch { /* ignore */ }
     listeners.forEach(l => l());
+    scheduleCloudSync();
   };
+
+  storeRegistry.set(key, {
+    replace: (value: unknown) => {
+      state = (value as T);
+      try { localStorage.setItem(key, JSON.stringify(state)); } catch { /* ignore */ }
+      listeners.forEach(l => l());
+    },
+    snapshot: () => state,
+    empty,
+  });
 
   // Keep multiple browser tabs in sync.
   if (typeof window !== 'undefined') {
@@ -109,6 +133,80 @@ function createStore<T>(key: string, fallback: T) {
 
 function useStore<T>(store: { get: () => T; subscribe: (cb: () => void) => () => void }): T {
   return useSyncExternalStore(store.subscribe, store.get, store.get);
+}
+
+// ─── Per-user cloud sync ─────────────────────────────────────────────────────
+
+/**
+ * The UID of the currently signed-in user, or null when logged out.
+ * Cloud sync only runs while a user is signed in — logged-out demo browsing
+ * never touches Firestore.
+ */
+let currentUid: string | null = null;
+let syncTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Snapshot every store keyed by its localStorage key, for saving to the cloud. */
+export function exportAllStores(): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  storeRegistry.forEach((s, key) => { out[key] = s.snapshot(); });
+  return out;
+}
+
+/** Overwrite stores from a cloud snapshot. Missing keys fall back to empty. */
+export function hydrateStores(data: Record<string, unknown> | null): void {
+  storeRegistry.forEach((s, key) => {
+    const value = data && key in data ? data[key] : s.empty;
+    s.replace(value);
+  });
+}
+
+/** Reset every store to its empty value — a brand-new user starts blank. */
+export function resetAllStores(): void {
+  storeRegistry.forEach(s => s.replace(s.empty));
+}
+
+/**
+ * Saves the current snapshot to Firestore (debounced). Called automatically on
+ * every store change while signed in, and flushed immediately on logout.
+ */
+function scheduleCloudSync(): void {
+  if (!currentUid) return;
+  if (syncTimer) clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => { void flushCloudSync(); }, 1500);
+}
+
+export async function flushCloudSync(): Promise<void> {
+  if (!currentUid) return;
+  if (syncTimer) { clearTimeout(syncTimer); syncTimer = null; }
+  const uid = currentUid;
+  const { saveUserData } = await import('./firestore');
+  await saveUserData(uid, exportAllStores());
+}
+
+/**
+ * Call on sign-in. Loads the user's cloud data into the stores; a brand-new
+ * user (no cloud document) gets a completely empty workspace — no demo data.
+ */
+export async function beginUserSession(uid: string): Promise<void> {
+  currentUid = uid;
+  const { loadUserData } = await import('./firestore');
+  const data = await loadUserData(uid);
+  hydrateStores(data); // null => everything resets to empty
+}
+
+/**
+ * Call on logout. Flushes the latest data to the cloud first so nothing is
+ * lost, then clears the in-memory/local stores so the next user (or the
+ * logged-out demo view) does not see the previous user's data.
+ */
+export async function endUserSession(): Promise<void> {
+  try {
+    await flushCloudSync();
+  } catch (err) {
+    console.error('Final cloud sync on logout failed:', err);
+  }
+  currentUid = null;
+  resetAllStores();
 }
 
 // ─── Default Data ────────────────────────────────────────────────────────────
@@ -166,12 +264,15 @@ const DEFAULT_TEAM_TASKS: TeamTask[] = [
 
 // ─── Shared store instances ──────────────────────────────────────────────────
 
-const tasksStore = createStore<Task[]>('scm_tasks', DEFAULT_TASKS);
-const habitsStore = createStore<Habit[]>('scm_habits', DEFAULT_HABITS);
-const subjectsStore = createStore<StudySubject[]>('scm_subjects', DEFAULT_SUBJECTS);
-const notesStore = createStore<Note[]>('scm_notes', []);
-const teamMembersStore = createStore<TeamMember[]>('scm_team_members', DEFAULT_TEAM_MEMBERS);
-const teamTasksStore = createStore<TeamTask[]>('scm_team_tasks', DEFAULT_TEAM_TASKS);
+// `fallback` is the demo data shown to a logged-out visitor (and on first
+// load before auth resolves). `empty` is what a freshly signed-in user with no
+// cloud data gets — a completely blank workspace.
+const tasksStore = createStore<Task[]>('scm_tasks', DEFAULT_TASKS, []);
+const habitsStore = createStore<Habit[]>('scm_habits', DEFAULT_HABITS, []);
+const subjectsStore = createStore<StudySubject[]>('scm_subjects', DEFAULT_SUBJECTS, []);
+const notesStore = createStore<Note[]>('scm_notes', [], []);
+const teamMembersStore = createStore<TeamMember[]>('scm_team_members', DEFAULT_TEAM_MEMBERS, []);
+const teamTasksStore = createStore<TeamTask[]>('scm_team_tasks', DEFAULT_TEAM_TASKS, []);
 
 // ─── Hooks ───────────────────────────────────────────────────────────────────
 
