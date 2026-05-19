@@ -286,7 +286,7 @@ export default function App() {
               className="h-full"
             >
               {currentView === 'dashboard' && <Dashboard />}
-              {currentView === 'calendar' && <CalendarView />}
+              {currentView === 'calendar' && <CalendarView calendarConnected={calendarConnected} onReconnect={handleReconnect} />}
               {currentView === 'planner' && <StudyPlanner />}
               {currentView === 'habits' && <HabitsView />}
               {currentView === 'team' && <TeamWorkspace />}

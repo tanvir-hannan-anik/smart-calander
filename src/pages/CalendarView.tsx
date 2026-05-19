@@ -7,7 +7,12 @@ import {
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { listUpcomingEvents, createCalendarEvent, describeReminders, CalendarAuthError } from '../lib/calendar';
-import { reconnectCalendar } from '../lib/auth';
+import { isCalendarConnected } from '../lib/auth';
+
+interface CalendarViewProps {
+  calendarConnected?: boolean;
+  onReconnect?: () => Promise<void>;
+}
 
 const HOUR_PX = 56;            // height of one hour row
 const DAY_PX = 24 * HOUR_PX;   // full-day column height
@@ -22,7 +27,7 @@ interface DisplayEvent {
   color: string;
 }
 
-export default function CalendarView() {
+export default function CalendarView({ calendarConnected = false, onReconnect }: CalendarViewProps) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [events, setEvents] = useState<DisplayEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -41,6 +46,12 @@ export default function CalendarView() {
   const days = eachDayOfInterval({ start: weekStart, end: weekEnd });
 
   const fetchEvents = async () => {
+    // Don't attempt to fetch if we know there's no token — avoids a guaranteed 401.
+    if (!isCalendarConnected()) {
+      setAuthError(true);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setAuthError(false);
     setErrMsg('');
@@ -79,7 +90,8 @@ export default function CalendarView() {
     }
   };
 
-  useEffect(() => { fetchEvents(); }, [currentDate]);
+  // Re-fetch when the week changes OR when the calendar becomes connected.
+  useEffect(() => { fetchEvents(); }, [currentDate, calendarConnected]);
 
   // Scroll the timeline to ~7 AM on first load instead of midnight.
   useEffect(() => {
@@ -91,7 +103,10 @@ export default function CalendarView() {
   const handleReconnect = async () => {
     setReconnecting(true);
     try {
-      await reconnectCalendar();
+      // Use the parent's reconnect handler if provided (so the global banner also updates)
+      if (onReconnect) {
+        await onReconnect();
+      }
       await fetchEvents();
     } catch (err) {
       console.error('Reconnect failed', err);
