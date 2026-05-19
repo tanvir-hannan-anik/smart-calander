@@ -33,6 +33,51 @@ When a user asks you to:
 Be concise, friendly, and proactive. Always suggest concrete next steps. Use emojis sparingly but effectively.
 Today's date is ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}.`;
 
+/**
+ * Turns a raw Gemini/genai SDK error into a short, actionable message.
+ * Avoids dumping raw JSON error blobs into the chat UI.
+ */
+function describeGeminiError(error: any): string {
+  // The SDK packs the server JSON into error.message; collect every string we can.
+  const raw = `${error?.message ?? ''} ${error?.status ?? ''} ${(() => {
+    try { return JSON.stringify(error); } catch { return ''; }
+  })()}`;
+
+  if (!import.meta.env.VITE_GEMINI_API_KEY) {
+    return 'No Gemini API key configured. Add VITE_GEMINI_API_KEY to your .env file and restart the dev server.';
+  }
+  if (
+    raw.includes('API key expired') ||
+    raw.includes('API_KEY_INVALID') ||
+    raw.includes('API key not valid') ||
+    raw.includes('INVALID_ARGUMENT')
+  ) {
+    return 'Your Gemini API key is expired or invalid. Generate a new key at https://aistudio.google.com/apikey, set it as VITE_GEMINI_API_KEY in your .env file, then restart the dev server.';
+  }
+  if (raw.includes('429') || raw.includes('Quota exceeded') || raw.includes('RESOURCE_EXHAUSTED')) {
+    return 'You have exceeded your Gemini API quota. Please wait a while or check your usage limits in Google AI Studio.';
+  }
+  if (raw.includes('403') || raw.includes('PERMISSION_DENIED') || raw.includes('denied access')) {
+    return 'Your Gemini API key was denied access or revoked. Generate a new key at https://aistudio.google.com/apikey and update your .env file.';
+  }
+  if (raw.includes('404') || raw.includes('NOT_FOUND')) {
+    return 'The requested Gemini model was not found. The model name may have changed — check the Google AI Studio model list.';
+  }
+  if (raw.includes('Failed to fetch') || raw.includes('NetworkError') || raw.includes('ENOTFOUND')) {
+    return 'Could not reach the Gemini API. Check your internet connection and try again.';
+  }
+
+  // Last resort: surface the API's human-readable message if we can find one,
+  // never the raw JSON envelope.
+  try {
+    const match = raw.match(/"message"\s*:\s*"([^"]+)"/);
+    if (match?.[1]) return match[1];
+  } catch { /* ignore */ }
+  return error?.message
+    ? String(error.message).slice(0, 200)
+    : 'Failed to connect to the Gemini API. Please check your API key and network connection.';
+}
+
 let chatHistory: { role: string; parts: { text: string }[] }[] = [];
 
 export function resetChat() {
@@ -84,17 +129,8 @@ export async function sendMessage(userMessage: string): Promise<AIResponse> {
     // Remove the failed message from history
     chatHistory.pop();
 
-    let errorMessage = 'Failed to connect to Gemini API. Please check your API key.';
-    if (error.message?.includes('429') || error.message?.includes('Quota exceeded')) {
-      errorMessage = 'You have exceeded your Gemini API quota. Please try again later or check your Google AI Studio billing limits.';
-    } else if (error.message?.includes('403') || error.message?.includes('PERMISSION_DENIED') || error.message?.includes('denied access')) {
-      errorMessage = 'Your Google API key has been denied access or revoked. Please generate a new API key in Google AI Studio and update your .env.local file.';
-    } else if (error.message) {
-      errorMessage = error.message;
-    }
-
     return {
-      message: `⚠️ AI Error: ${errorMessage}`,
+      message: `⚠️ AI Error: ${describeGeminiError(error)}`,
     };
   }
 }

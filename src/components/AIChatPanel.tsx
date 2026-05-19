@@ -172,12 +172,12 @@ export default function AIChatPanel({ onClose }: { onClose: () => void }) {
               )}
               
               <div className={cn(
-                "p-3 rounded-lg text-sm leading-relaxed",
-                msg.role === 'user' 
-                  ? "bg-blue-600 text-white" 
+                "p-3 rounded-lg text-sm leading-relaxed min-w-0",
+                msg.role === 'user'
+                  ? "bg-blue-600 text-white"
                   : "bg-[#2A2A2A] text-gray-200 border border-[#3A3A3A]"
               )}>
-                <div className="whitespace-pre-wrap">{msg.text}</div>
+                <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{msg.text}</div>
                 
                 {msg.action && !msg.actionExecuted && (
                   <div className="mt-3 bg-[#1e1e1e] border border-[#3a3a3a] rounded-md p-2 flex flex-col gap-2">
