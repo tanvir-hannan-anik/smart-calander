@@ -97,9 +97,18 @@ function describeGeminiError(error: any): string {
     return 'Your Gemini API key is expired or invalid. Generate a new key at https://aistudio.google.com/apikey, set it as VITE_GEMINI_API_KEY in your .env file, then restart the dev server.';
   }
   if (raw.includes('429') || raw.includes('Quota exceeded') || raw.includes('RESOURCE_EXHAUSTED')) {
+    // "limit: 0" means the key is valid but its Google Cloud project has NO
+    // free-tier quota at all (not a transient rate-limit). Regenerating the
+    // key in the same project will not help — the project itself is the issue.
+    if (/limit:\s*0/.test(raw)) {
+      return 'Your Gemini API key is valid, but its Google Cloud project has zero free-tier quota (limit: 0). Create a new API key under a DIFFERENT Google Cloud project at https://aistudio.google.com/apikey (use "Create API key in new project"), then update VITE_GEMINI_API_KEY in your .env and restart the dev server.';
+    }
     return 'You have exceeded your Gemini API quota. Please wait a while or check your usage limits in Google AI Studio.';
   }
-  if (raw.includes('403') || raw.includes('PERMISSION_DENIED') || raw.includes('denied access')) {
+  if (raw.includes('PERMISSION_DENIED') || raw.includes('SERVICE_DISABLED') || /API .*not.*enabled/i.test(raw)) {
+    return 'The Generative Language API is not enabled (or is blocked by key restrictions) for this key’s project. Enable "Generative Language API" in Google Cloud Console, or create a new key with no API restrictions.';
+  }
+  if (raw.includes('403') || raw.includes('denied access')) {
     return 'Your Gemini API key was denied access or revoked. Generate a new key at https://aistudio.google.com/apikey and update your .env file.';
   }
   if (raw.includes('404') || raw.includes('NOT_FOUND')) {
