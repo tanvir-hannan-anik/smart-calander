@@ -1,0 +1,10 @@
+{
+  "name": "Smart Calendar Manager",
+  "description": "An AI-powered calendar assistant that helps users manage schedules, study plans, and daily productivity.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
