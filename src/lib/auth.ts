@@ -16,13 +16,16 @@ setPersistence(auth, browserLocalPersistence).catch(err =>
 
 const provider = new GoogleAuthProvider();
 provider.addScope('https://www.googleapis.com/auth/calendar.events');
-// Ask for offline-ish consent every time we explicitly reconnect so the user
-// can re-grant calendar access when the short-lived token expires.
-provider.setCustomParameters({ prompt: 'consent' });
+// Only ask for consent if there is no valid token already stored.
+// Using 'select_account' instead of 'consent' avoids forcing re-grant
+// every single sign-in while still letting the user switch accounts.
+provider.setCustomParameters({ prompt: 'select_account' });
 
 const TOKEN_KEY = 'scm_gcal_token';
-// Google OAuth implicit tokens last ~3600s; refresh a little early for safety.
-const TOKEN_TTL_MS = 55 * 60 * 1000;
+// Google OAuth implicit tokens officially last 3600s.
+// We store them with a 58-minute TTL (a little under 1 hour) so the UI
+// doesn't show a stale-token banner before the token actually expires.
+const TOKEN_TTL_MS = 58 * 60 * 1000;
 
 interface StoredToken {
   accessToken: string;
@@ -110,18 +113,36 @@ export const initAuth = (onChange: (state: AuthState) => void) => {
   });
   const unsubAuth = onAuthStateChanged(auth, (user: User | null) => {
     authResolved = true;
-    if (!user) clearCalendarToken();
+    if (!user) {
+      clearCalendarToken();
+      onChange({ user: null, calendarConnected: false, ready: true });
+      return;
+    }
     if (!isSigningIn) {
-      onChange({ user, calendarConnected: !!user && isCalendarConnected(), ready: true });
+      // User session was restored from Firebase persistence.
+      // Check if we have a valid calendar token in localStorage.
+      const connected = isCalendarConnected();
+      onChange({ user, calendarConnected: connected, ready: true });
     }
   });
   return () => { unsubConn(); unsubAuth(); };
 };
 
 export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
+  // If we already have a valid token, reuse it — don't force a new consent popup.
+  const existing = await getAccessToken();
+  if (existing && auth.currentUser) {
+    return { user: auth.currentUser, accessToken: existing };
+  }
+
+  // For reconnect, force consent so user can re-grant calendar access.
+  const reconnectProvider = new GoogleAuthProvider();
+  reconnectProvider.addScope('https://www.googleapis.com/auth/calendar.events');
+  reconnectProvider.setCustomParameters({ prompt: 'consent' });
+
   try {
     isSigningIn = true;
-    const result = await signInWithPopup(auth, provider);
+    const result = await signInWithPopup(auth, reconnectProvider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
     if (!credential?.accessToken) {
       throw new Error('Google did not return a Calendar access token. Please try again and grant calendar access.');
