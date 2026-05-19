@@ -1,7 +1,15 @@
-import { useState } from 'react';
-import { Play, MoreVertical, Plus, GripVertical, CheckCircle2, Circle, X } from 'lucide-react';
+import { Play, MoreVertical, Plus, GripVertical, CheckCircle2, X } from 'lucide-react';
 import { useStudyPlanner } from '../lib/store';
 import { createCalendarEvent } from '../lib/calendar';
+
+const colorMap: Record<string, { border: string, bg: string, text: string }> = {
+  blue: { border: 'border-blue-500', bg: 'bg-blue-500', text: 'text-blue-400' },
+  purple: { border: 'border-purple-500', bg: 'bg-purple-500', text: 'text-purple-400' },
+  green: { border: 'border-green-500', bg: 'bg-green-500', text: 'text-green-400' },
+  orange: { border: 'border-orange-500', bg: 'bg-orange-500', text: 'text-orange-400' },
+  red: { border: 'border-red-500', bg: 'bg-red-500', text: 'text-red-400' },
+  cyan: { border: 'border-cyan-500', bg: 'bg-cyan-500', text: 'text-cyan-400' },
+};
 
 export default function StudyPlanner() {
   const { subjects, addSubject, addSession, toggleSession, deleteSession, getProgress } = useStudyPlanner();
@@ -82,13 +90,13 @@ export default function StudyPlanner() {
             <h2 className="font-medium">Subjects</h2>
             <div className="space-y-3">
                {subjects.map((s) => (
-                  <div key={s.id} className={`p-4 rounded-xl border border-[#333] bg-[#222] border-l-4 border-${s.color}-500`}>
+                  <div key={s.id} className={`p-4 rounded-xl border border-[#333] bg-[#222] border-l-4 ${colorMap[s.color]?.border || 'border-blue-500'}`}>
                      <div className="flex justify-between items-center mb-3">
                         <span className="font-medium text-sm">{s.title}</span>
                         <MoreVertical className="w-4 h-4 text-gray-500 cursor-pointer hover:text-white" />
                      </div>
                      <div className="w-full bg-[#111] rounded-full h-1.5 overflow-hidden">
-                        <div className={`h-full bg-${s.color}-500`} style={{ width: `${getProgress(s.id)}%` }}></div>
+                        <div className={`h-full ${colorMap[s.color]?.bg || 'bg-blue-500'}`} style={{ width: `${getProgress(s.id)}%` }}></div>
                      </div>
                      <div className="mt-2 text-xs text-gray-400 text-right">{getProgress(s.id)}% ready</div>
                   </div>
@@ -134,7 +142,7 @@ export default function StudyPlanner() {
                           s.sessions.filter(ss => ss.day === day).map(session => (
                             <div key={session.id} className={`bg-[#2a2a2a] p-3 rounded-lg border ${session.completed ? 'border-green-500/30 opacity-60' : 'border-[#3a3a3a]'} group cursor-grab`}>
                                <div className="flex justify-between items-start mb-2">
-                                  <span className={`text-xs font-medium text-${s.color}-400`}>{s.title}</span>
+                                  <span className={`text-xs font-medium ${colorMap[s.color]?.text || 'text-blue-400'}`}>{s.title}</span>
                                   <button onClick={() => deleteSession(s.id, session.id)} className="opacity-0 group-hover:opacity-100 transition-opacity">
                                     <X className="w-3.5 h-3.5 text-gray-500 hover:text-red-400" />
                                   </button>

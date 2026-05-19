@@ -4,6 +4,15 @@ import { useHabits, todayStr } from '../lib/store';
 import { cn } from '../lib/utils';
 import { format, subDays } from 'date-fns';
 
+const habitColorMap: Record<string, { bgIcon: string, text: string, bgActive: string, shadow: string }> = {
+  green: { bgIcon: 'bg-green-500/20', text: 'text-green-400', bgActive: 'bg-green-500', shadow: 'shadow-[0_0_10px_rgba(34,197,94,0.3)]' },
+  blue: { bgIcon: 'bg-blue-500/20', text: 'text-blue-400', bgActive: 'bg-blue-500', shadow: 'shadow-[0_0_10px_rgba(59,130,246,0.3)]' },
+  purple: { bgIcon: 'bg-purple-500/20', text: 'text-purple-400', bgActive: 'bg-purple-500', shadow: 'shadow-[0_0_10px_rgba(168,85,247,0.3)]' },
+  orange: { bgIcon: 'bg-orange-500/20', text: 'text-orange-400', bgActive: 'bg-orange-500', shadow: 'shadow-[0_0_10px_rgba(249,115,22,0.3)]' },
+  red: { bgIcon: 'bg-red-500/20', text: 'text-red-400', bgActive: 'bg-red-500', shadow: 'shadow-[0_0_10px_rgba(239,68,68,0.3)]' },
+  cyan: { bgIcon: 'bg-cyan-500/20', text: 'text-cyan-400', bgActive: 'bg-cyan-500', shadow: 'shadow-[0_0_10px_rgba(6,182,212,0.3)]' },
+};
+
 export default function HabitsView() {
   const { habits, addHabit, toggleCheckin, deleteHabit, getStreak } = useHabits();
   
@@ -79,7 +88,7 @@ export default function HabitsView() {
                 </button>
                 
                 <div className="flex items-center gap-3 mb-6">
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center bg-${habit.color}-500/20 text-${habit.color}-400 text-lg`}>
+                  <div className={cn("w-10 h-10 rounded-full flex items-center justify-center text-lg", habitColorMap[habit.color]?.bgIcon || 'bg-blue-500/20', habitColorMap[habit.color]?.text || 'text-blue-400')}>
                     {habit.icon}
                   </div>
                   <div>
@@ -106,7 +115,7 @@ export default function HabitsView() {
                           className={cn(
                             "w-8 h-8 rounded-full flex items-center justify-center transition-all duration-200",
                             isChecked 
-                              ? `bg-${habit.color}-500 text-white shadow-[0_0_10px_rgba(var(--${habit.color}-500),0.3)]` 
+                              ? cn("text-white", habitColorMap[habit.color]?.bgActive || 'bg-blue-500', habitColorMap[habit.color]?.shadow) 
                               : "bg-[#111] border border-[#333] text-transparent hover:border-gray-500"
                           )}
                         >
