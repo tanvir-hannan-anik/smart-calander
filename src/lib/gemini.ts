@@ -47,7 +47,7 @@ export async function sendMessage(userMessage: string): Promise<AIResponse> {
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash',
+      model: 'gemini-2.5-flash',
       contents: [
         { role: 'user', parts: [{ text: SYSTEM_PROMPT }] },
         { role: 'model', parts: [{ text: 'Understood! I\'m Cal AI, ready to help you manage your schedule and productivity. How can I help you today?' }] },
@@ -100,7 +100,7 @@ export async function sendMessage(userMessage: string): Promise<AIResponse> {
 export async function getAIInsight(context: string): Promise<string> {
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash',
+      model: 'gemini-2.5-flash',
       contents: [{
         role: 'user',
         parts: [{ text: `You are a productivity assistant. Based on this context, give ONE brief, actionable insight (2 sentences max):\n\n${context}` }],
