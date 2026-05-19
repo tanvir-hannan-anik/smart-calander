@@ -47,7 +47,7 @@ export async function sendMessage(userMessage: string): Promise<AIResponse> {
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.0-flash',
+      model: 'gemini-1.5-flash',
       contents: [
         { role: 'user', parts: [{ text: SYSTEM_PROMPT }] },
         { role: 'model', parts: [{ text: 'Understood! I\'m Cal AI, ready to help you manage your schedule and productivity. How can I help you today?' }] },
@@ -84,8 +84,15 @@ export async function sendMessage(userMessage: string): Promise<AIResponse> {
     // Remove the failed message from history
     chatHistory.pop();
 
+    let errorMessage = 'Failed to connect to Gemini API. Please check your API key.';
+    if (error.message?.includes('429') || error.message?.includes('Quota exceeded')) {
+      errorMessage = 'You have exceeded your Gemini API quota. Please try again later or check your Google AI Studio billing limits.';
+    } else if (error.message) {
+      errorMessage = error.message;
+    }
+
     return {
-      message: `⚠️ AI Error: ${error.message || 'Failed to connect to Gemini API. Please check your API key.'}`,
+      message: `⚠️ AI Error: ${errorMessage}`,
     };
   }
 }
@@ -93,7 +100,7 @@ export async function sendMessage(userMessage: string): Promise<AIResponse> {
 export async function getAIInsight(context: string): Promise<string> {
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.0-flash',
+      model: 'gemini-1.5-flash',
       contents: [{
         role: 'user',
         parts: [{ text: `You are a productivity assistant. Based on this context, give ONE brief, actionable insight (2 sentences max):\n\n${context}` }],
