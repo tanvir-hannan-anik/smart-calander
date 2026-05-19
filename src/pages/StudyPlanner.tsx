@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Play, MoreVertical, Plus, GripVertical, CheckCircle2, X } from 'lucide-react';
 import { useStudyPlanner } from '../lib/store';
 import { createCalendarEvent } from '../lib/calendar';
