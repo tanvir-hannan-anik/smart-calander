@@ -31,15 +31,13 @@ export default function TeamWorkspace() {
   const [newWsName, setNewWsName] = useState('');
   const [creatingWs, setCreatingWs] = useState(false);
   const [pendingInvites, setPendingInvites] = useState<Invitation[]>([]);
-  const [inviteSubError, setInviteSubError] = useState<string | null>(null);
 
-  // Real-time pending invitations for this user's email.
+  // Real-time pending invitations for this user's email. Errors (e.g. missing
+  // index, blocked by rules) are still logged to the console by the
+  // subscription itself — we just don't surface them in the UI.
   useEffect(() => {
     if (!user?.email) return;
-    const unsub = subscribePendingInvitations(user.email, (invs, err) => {
-      setPendingInvites(invs);
-      setInviteSubError(err || null);
-    });
+    const unsub = subscribePendingInvitations(user.email, invs => setPendingInvites(invs));
     return () => unsub();
   }, [user?.email]);
 
@@ -203,18 +201,6 @@ export default function TeamWorkspace() {
           )}
         </div>
       </header>
-
-      {/* Diagnostic: invitation subscription error (index / rules / permission) */}
-      {inviteSubError && (
-        <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
-          <div className="font-medium mb-1">Invitations can't be loaded</div>
-          <div className="text-amber-100/90">{inviteSubError}</div>
-          <div className="mt-2 text-xs text-amber-200/70">
-            Signed in as <span className="font-mono">{user.email || '(no email)'}</span>.
-            If you expected an invite, confirm the inviter sent it to this exact email and check the browser console for a Firestore link to create the missing index.
-          </div>
-        </div>
-      )}
 
       {/* Pending invitations banner */}
       {pendingInvites.length > 0 && (
