@@ -2,7 +2,7 @@ import { getApp } from 'firebase/app';
 import {
   getFirestore, doc, collection, getDoc, getDocs, setDoc, updateDoc, deleteDoc,
   addDoc, query, where, onSnapshot, arrayUnion, arrayRemove, serverTimestamp,
-  Unsubscribe,
+  writeBatch, Unsubscribe,
 } from 'firebase/firestore';
 
 /**
@@ -252,32 +252,41 @@ export async function acceptInvitation(
   invitation: Invitation,
   invitee: { uid: string; email: string | null; displayName: string | null; photoURL?: string | null },
 ): Promise<void> {
+  // We deliberately do NOT read the workspace doc here — a non-member cannot
+  // read it under the security rules, which would make accept fail. Instead
+  // we add ourselves via arrayUnion + a single keyed field on memberInfo, all
+  // in one atomic batch alongside the user-index update and the invitation
+  // status change. The security rules permit this specific shape (non-member
+  // adding only themselves while there is a matching pending invitation).
   const wsRef = doc(db, 'workspaces', invitation.workspaceId);
-  const wsSnap = await getDoc(wsRef);
-  if (!wsSnap.exists()) {
-    // Workspace was deleted between invite and accept — mark invitation declined.
-    await updateDoc(doc(db, 'invitations', invitation.id), { status: 'declined' });
-    throw new Error('That workspace no longer exists.');
-  }
-  const existing = wsSnap.data() as Workspace;
-  const newMemberInfo = {
-    ...(existing.memberInfo || {}),
-    [invitee.uid]: {
-      name: invitee.displayName || invitee.email || 'Member',
-      email: invitee.email || '',
-      photoURL: invitee.photoURL || undefined,
-    },
+  const userRef = doc(db, 'users', invitee.uid);
+  const invRef = doc(db, 'invitations', invitation.id);
+
+  const myInfo = {
+    name: invitee.displayName || invitee.email || 'Member',
+    email: invitee.email || '',
+    ...(invitee.photoURL ? { photoURL: invitee.photoURL } : {}),
   };
-  await updateDoc(wsRef, {
+
+  const batch = writeBatch(db);
+  batch.update(wsRef, {
     memberUids: arrayUnion(invitee.uid),
-    memberInfo: newMemberInfo,
+    // Dotted field path writes a single key inside the memberInfo map without
+    // touching other members' entries (which we couldn't read anyway).
+    [`memberInfo.${invitee.uid}`]: myInfo,
   });
-  await setDoc(
-    doc(db, 'users', invitee.uid),
-    { workspaceIds: arrayUnion(invitation.workspaceId) },
-    { merge: true },
-  );
-  await updateDoc(doc(db, 'invitations', invitation.id), { status: 'accepted' });
+  batch.set(userRef, { workspaceIds: arrayUnion(invitation.workspaceId) }, { merge: true });
+  batch.update(invRef, { status: 'accepted' });
+
+  try {
+    await batch.commit();
+  } catch (err: any) {
+    // Surface a useful error so the UI can show it instead of silently failing.
+    const msg = err?.code === 'permission-denied'
+      ? 'Accept was blocked by Firestore security rules. Update the rules to allow non-members with a matching pending invitation to add themselves.'
+      : (err?.message || 'Failed to accept invitation.');
+    throw new Error(msg);
+  }
 }
 
 export async function declineInvitation(invitationId: string): Promise<void> {

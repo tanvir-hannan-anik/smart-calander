@@ -99,7 +99,10 @@ export default function TeamWorkspace() {
     }
   };
 
+  const [acceptError, setAcceptError] = useState<string | null>(null);
+
   const handleAccept = async (inv: Invitation) => {
+    setAcceptError(null);
     try {
       await acceptInvitation(inv, {
         uid: user.uid, email: user.email,
@@ -107,8 +110,9 @@ export default function TeamWorkspace() {
       });
       await refreshWorkspaces();
       setActiveWorkspaceId(inv.workspaceId);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Accept invitation failed:', err);
+      setAcceptError(err?.message || 'Failed to accept the invitation.');
     }
   };
 
@@ -213,6 +217,11 @@ export default function TeamWorkspace() {
               </button>
             </div>
           ))}
+          {acceptError && (
+            <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+              {acceptError}
+            </div>
+          )}
         </div>
       )}
 
