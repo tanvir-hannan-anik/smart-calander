@@ -62,9 +62,17 @@ export default function App() {
   const handleReconnect = async () => {
     setIsLoggingIn(true);
     try {
-      const { reconnectCalendar } = await import('./lib/auth');
-      const ok = await reconnectCalendar();
-      setCalendarConnected(ok);
+      // Use the full sign-in flow so logged-out visitors who click
+      // "Connect Google Calendar" are also signed into the app — not just
+      // granted a calendar token. googleSignIn returns the user when the
+      // popup succeeds; onAuthStateChanged suppresses its callback while a
+      // sign-in is in progress, so we update the user state ourselves here.
+      const { googleSignIn } = await import('./lib/auth');
+      const result = await googleSignIn();
+      if (result) {
+        setUser(result.user);
+        setCalendarConnected(true);
+      }
     } catch (err) {
       console.error('Reconnect failed:', err);
     } finally {
