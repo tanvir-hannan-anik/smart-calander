@@ -1,8 +1,8 @@
 import { getApp } from 'firebase/app';
 import {
-  getFirestore, doc, collection, getDoc, getDocs, setDoc, updateDoc, deleteDoc,
-  addDoc, query, where, onSnapshot, arrayUnion, arrayRemove, serverTimestamp,
-  writeBatch, Unsubscribe,
+  getFirestore, doc, collection, collectionGroup, getDoc, getDocs, setDoc,
+  updateDoc, deleteDoc, query, where, onSnapshot, arrayUnion, arrayRemove,
+  serverTimestamp, writeBatch, Unsubscribe,
 } from 'firebase/firestore';
 
 /**
@@ -13,15 +13,26 @@ import {
  *     name, ownerUid, memberUids: [uid...], memberInfo: { uid: {...} },
  *     tasks: [{ id, title, assigneeUid, label, status }]
  *
- *   invitations/{iid}
+ *   workspaces/{wid}/invitations/{normalizedEmail}   -- ONE invite per email/ws
  *     workspaceId, workspaceName, inviterUid, inviterEmail,
  *     inviteeEmail (lowercased), status: 'pending'|'accepted'|'declined'
  *
  *   users/{uid}.workspaceIds: [wid...]   -- index of workspaces this user belongs to
  *
- * Invitations are in-app only: no real email is sent. The invitee discovers
- * pending invitations by querying invitations where inviteeEmail == their own
- * email; that is also why we lowercase emails before storing/querying.
+ * Invitations live as a subcollection of the workspace with the invitee's
+ * lowercased email as the document ID. That gives us two properties the
+ * security rules rely on:
+ *   1. There is at most one pending invitation per email per workspace
+ *      (re-invite simply overwrites the previous record), and
+ *   2. The workspace-update rule can verify the invitation exists at a
+ *      KNOWN path (no cross-collection query required from rules).
+ *
+ * To find all pending invitations across every workspace for the current
+ * user, we use a collectionGroup('invitations') query filtered by
+ * inviteeEmail. Firestore will prompt for a one-time composite index.
+ *
+ * No real email is sent (in-app invitations only). The invitee discovers
+ * pending invitations the next time they open the app.
  */
 
 const db = getFirestore(getApp());
@@ -208,7 +219,12 @@ export async function inviteMember(
 ): Promise<void> {
   const email = normalizeEmail(inviteeEmail);
   if (!email || !email.includes('@')) throw new Error('Please enter a valid email address.');
-  await addDoc(collection(db, 'invitations'), {
+  // Path: workspaces/{wid}/invitations/{email} — using the email as the doc
+  // ID lets the security rules verify the invitation exists at a known path
+  // when the invitee tries to join, and naturally caps invites at one per
+  // email per workspace.
+  const ref = doc(db, 'workspaces', workspace.id, 'invitations', email);
+  await setDoc(ref, {
     workspaceId: workspace.id,
     workspaceName: workspace.name,
     inviterUid: inviter.uid,
@@ -219,10 +235,10 @@ export async function inviteMember(
   });
 }
 
-/** All pending invitations addressed to the given email. */
+/** All pending invitations addressed to the given email (across all workspaces). */
 export async function listPendingInvitations(email: string): Promise<Invitation[]> {
   const q = query(
-    collection(db, 'invitations'),
+    collectionGroup(db, 'invitations'),
     where('inviteeEmail', '==', normalizeEmail(email)),
     where('status', '==', 'pending'),
   );
@@ -236,14 +252,18 @@ export function subscribePendingInvitations(
   onChange: (invites: Invitation[]) => void,
 ): Unsubscribe {
   const q = query(
-    collection(db, 'invitations'),
+    collectionGroup(db, 'invitations'),
     where('inviteeEmail', '==', normalizeEmail(email)),
     where('status', '==', 'pending'),
   );
   return onSnapshot(q, snap => {
     onChange(snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<Invitation, 'id'>) })));
   }, err => {
-    console.error('Invitations subscription failed:', err);
+    // The first time this query runs, Firestore will likely respond with a
+    // FAILED_PRECONDITION asking to create a composite index. The error
+    // message includes a one-click console URL — open it once and the query
+    // works from then on.
+    console.error('Invitations subscription failed (you may need to create a Firestore index — check the error for a link):', err);
     onChange([]);
   });
 }
@@ -260,7 +280,9 @@ export async function acceptInvitation(
   // adding only themselves while there is a matching pending invitation).
   const wsRef = doc(db, 'workspaces', invitation.workspaceId);
   const userRef = doc(db, 'users', invitee.uid);
-  const invRef = doc(db, 'invitations', invitation.id);
+  // The invitation doc id IS the lowercased invitee email — exactly the path
+  // the security rules check via exists() to authorise the self-add.
+  const invRef = doc(db, 'workspaces', invitation.workspaceId, 'invitations', invitation.id);
 
   const myInfo = {
     name: invitee.displayName || invitee.email || 'Member',
@@ -289,6 +311,9 @@ export async function acceptInvitation(
   }
 }
 
-export async function declineInvitation(invitationId: string): Promise<void> {
-  await updateDoc(doc(db, 'invitations', invitationId), { status: 'declined' });
+export async function declineInvitation(workspaceId: string, invitationId: string): Promise<void> {
+  await updateDoc(
+    doc(db, 'workspaces', workspaceId, 'invitations', invitationId),
+    { status: 'declined' },
+  );
 }

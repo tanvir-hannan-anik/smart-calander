@@ -117,7 +117,7 @@ export default function TeamWorkspace() {
   };
 
   const handleDecline = async (inv: Invitation) => {
-    try { await declineInvitation(inv.id); } catch (err) { console.error(err); }
+    try { await declineInvitation(inv.workspaceId, inv.id); } catch (err) { console.error(err); }
   };
 
   const handleLeave = async () => {
