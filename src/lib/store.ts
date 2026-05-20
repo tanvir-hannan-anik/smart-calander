@@ -1,4 +1,5 @@
-import { useCallback, useSyncExternalStore } from 'react';
+import { useCallback, useMemo, useSyncExternalStore } from 'react';
+import { useWorkspace } from './workspaceContext';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -248,20 +249,6 @@ const DEFAULT_SUBJECTS: StudySubject[] = [
   },
 ];
 
-const DEFAULT_TEAM_MEMBERS: TeamMember[] = [
-  { id: generateId(), name: 'Tanvir', avatar: '🧑‍💻' },
-  { id: generateId(), name: 'Sarah', avatar: '👩‍🔬' },
-  { id: generateId(), name: 'Alex', avatar: '🧑‍🎨' },
-];
-
-const DEFAULT_TEAM_TASKS: TeamTask[] = [
-  { id: generateId(), title: 'Design landing page', assignee: 'Alex', label: 'Design', status: 'done' },
-  { id: generateId(), title: 'Set up CI/CD pipeline', assignee: 'Tanvir', label: 'DevOps', status: 'in-progress' },
-  { id: generateId(), title: 'Write API documentation', assignee: 'Sarah', label: 'Docs', status: 'todo' },
-  { id: generateId(), title: 'Database schema review', assignee: 'Tanvir', label: 'Backend', status: 'todo' },
-  { id: generateId(), title: 'User research interviews', assignee: 'Sarah', label: 'Research', status: 'in-progress' },
-];
-
 // ─── Shared store instances ──────────────────────────────────────────────────
 
 // `fallback` is the demo data shown to a logged-out visitor (and on first
@@ -271,8 +258,8 @@ const tasksStore = createStore<Task[]>('scm_tasks', DEFAULT_TASKS, []);
 const habitsStore = createStore<Habit[]>('scm_habits', DEFAULT_HABITS, []);
 const subjectsStore = createStore<StudySubject[]>('scm_subjects', DEFAULT_SUBJECTS, []);
 const notesStore = createStore<Note[]>('scm_notes', [], []);
-const teamMembersStore = createStore<TeamMember[]>('scm_team_members', DEFAULT_TEAM_MEMBERS, []);
-const teamTasksStore = createStore<TeamTask[]>('scm_team_tasks', DEFAULT_TEAM_TASKS, []);
+// Team data now lives in shared `workspaces/{id}` Firestore docs via
+// workspaceContext.tsx — no per-user store for members/team tasks.
 
 // ─── Hooks ───────────────────────────────────────────────────────────────────
 
@@ -408,27 +395,71 @@ export function useNotes() {
   return { notes, addNote, updateNote, deleteNote };
 }
 
+/**
+ * useTeam — backed by the active shared workspace (Firestore, real-time).
+ *
+ * The shape is preserved for backwards compatibility with AIChatPanel.tsx,
+ * which uses `addTeamTask`/`moveTask`/`deleteTeamTask`. When no workspace is
+ * active yet, members/tasks are empty arrays and mutations are no-ops.
+ */
 export function useTeam() {
-  const members = useStore(teamMembersStore);
-  const tasks = useStore(teamTasksStore);
+  const { workspace, addTask, moveTask: ctxMoveTask, deleteTask } = useWorkspace();
 
-  const addMember = useCallback((name: string, avatar: string) => {
-    teamMembersStore.set(prev => [...prev, { id: generateId(), name, avatar }]);
-  }, []);
+  // Map shared workspace members to the legacy { id, name, avatar } shape.
+  // The AI chat uses members[0]?.name as the default assignee — that still
+  // works because the owner is the first member.
+  const members = useMemo(() => {
+    if (!workspace) return [] as TeamMember[];
+    return workspace.memberUids.map(uid => {
+      const info = workspace.memberInfo[uid];
+      return {
+        id: uid,
+        name: info?.name || 'Member',
+        // Stable colour-emoji per UID; gives every member a distinct chip.
+        avatar: info?.photoURL ? '' : '👤',
+      } as TeamMember;
+    });
+  }, [workspace]);
+
+  const tasks = useMemo<TeamTask[]>(() => {
+    if (!workspace) return [];
+    return workspace.tasks.map(t => ({
+      id: t.id,
+      title: t.title,
+      // Legacy `assignee` was a display name — map UID -> name for old callers.
+      assignee: workspace.memberInfo[t.assigneeUid]?.name || 'Member',
+      label: t.label,
+      status: t.status,
+    }));
+  }, [workspace]);
 
   const addTeamTask = useCallback((title: string, assignee: string, label: string) => {
-    const task: TeamTask = { id: generateId(), title, assignee, label, status: 'todo' };
-    teamTasksStore.set(prev => [...prev, task]);
-    return task;
-  }, []);
+    // Legacy callers pass an assignee NAME. Resolve it to a UID; fall back to
+    // the owner so a task is never orphaned.
+    const ws = workspace;
+    if (!ws) {
+      return { id: generateId(), title, assignee, label, status: 'todo' } as TeamTask;
+    }
+    const matchUid = ws.memberUids.find(uid =>
+      (ws.memberInfo[uid]?.name || '').toLowerCase() === assignee.toLowerCase(),
+    ) || ws.ownerUid;
+    void addTask(title, matchUid, label);
+    return {
+      id: generateId(), title,
+      assignee: ws.memberInfo[matchUid]?.name || assignee,
+      label, status: 'todo',
+    } as TeamTask;
+  }, [workspace, addTask]);
 
   const moveTask = useCallback((id: string, status: TeamTask['status']) => {
-    teamTasksStore.set(prev => prev.map(t => t.id === id ? { ...t, status } : t));
-  }, []);
+    void ctxMoveTask(id, status);
+  }, [ctxMoveTask]);
 
   const deleteTeamTask = useCallback((id: string) => {
-    teamTasksStore.set(prev => prev.filter(t => t.id !== id));
-  }, []);
+    void deleteTask(id);
+  }, [deleteTask]);
 
-  return { members, tasks, addMember, addTeamTask, moveTask, deleteTeamTask };
+  // addMember is intentionally omitted from the new API — adding members is
+  // done via inviteMember() on the workspace, not a local add.
+  return { members, tasks, addTeamTask, moveTask, deleteTeamTask };
 }

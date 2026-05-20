@@ -246,7 +246,7 @@ export default function AIChatPanel({ onClose }: { onClose: () => void }) {
           break;
         }
         case 'move_team_task': {
-          const t = findByName(teamTasks, 'title', d.title);
+          const t = teamTasks.find(tt => tt.title.toLowerCase() === String(d.title || '').trim().toLowerCase());
           if (!t) throw new Error(`No team task named "${d.title}" found.`);
           const status = ['todo', 'in-progress', 'done'].includes(d.status) ? d.status : 'done';
           moveTask(t.id, status);
@@ -254,7 +254,7 @@ export default function AIChatPanel({ onClose }: { onClose: () => void }) {
           break;
         }
         case 'delete_team_task': {
-          const t = findByName(teamTasks, 'title', d.title);
+          const t = teamTasks.find(tt => tt.title.toLowerCase() === String(d.title || '').trim().toLowerCase());
           if (!t) throw new Error(`No team task named "${d.title}" found.`);
           deleteTeamTask(t.id);
           reply(msgIndex, `🗑️ Team task "${t.title}" deleted.`);

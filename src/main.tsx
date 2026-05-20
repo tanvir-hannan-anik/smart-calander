@@ -1,10 +1,13 @@
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
+import { WorkspaceProvider } from './lib/workspaceContext';
 import './index.css';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <WorkspaceProvider>
+      <App />
+    </WorkspaceProvider>
   </StrictMode>,
 );
