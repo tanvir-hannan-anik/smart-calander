@@ -249,22 +249,34 @@ export async function listPendingInvitations(email: string): Promise<Invitation[
 /** Real-time subscribe to pending invitations for this email. */
 export function subscribePendingInvitations(
   email: string,
-  onChange: (invites: Invitation[]) => void,
+  onChange: (invites: Invitation[], error?: string) => void,
 ): Unsubscribe {
+  const normalized = normalizeEmail(email);
+  console.log('[invitations] subscribing for', normalized);
   const q = query(
     collectionGroup(db, 'invitations'),
-    where('inviteeEmail', '==', normalizeEmail(email)),
+    where('inviteeEmail', '==', normalized),
     where('status', '==', 'pending'),
   );
   return onSnapshot(q, snap => {
-    onChange(snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<Invitation, 'id'>) })));
+    const invites = snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<Invitation, 'id'>) }));
+    console.log(`[invitations] received ${invites.length} pending for ${normalized}`);
+    onChange(invites);
   }, err => {
-    // The first time this query runs, Firestore will likely respond with a
-    // FAILED_PRECONDITION asking to create a composite index. The error
-    // message includes a one-click console URL — open it once and the query
-    // works from then on.
-    console.error('Invitations subscription failed (you may need to create a Firestore index — check the error for a link):', err);
-    onChange([]);
+    // The two real reasons this fails:
+    //   • failed-precondition  -> composite index missing (one-click link in the
+    //     error message); the query silently returns nothing until the index exists.
+    //   • permission-denied    -> security rules don't allow the read.
+    const code = (err as any)?.code || 'unknown';
+    const msg = (err as any)?.message || String(err);
+    console.error(`[invitations] subscription failed (${code}):`, msg);
+    let hint = msg;
+    if (code === 'failed-precondition' || /index/i.test(msg)) {
+      hint = 'Firestore needs a composite index for the invitations query. Open the browser console — the error above contains a one-click link to create it.';
+    } else if (code === 'permission-denied') {
+      hint = 'Firestore security rules are blocking the invitations read. Update the rules to allow the invitee to read invitations addressed to their email.';
+    }
+    onChange([], hint);
   });
 }
 
